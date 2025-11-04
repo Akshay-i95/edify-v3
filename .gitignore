@@ -1,0 +1,241 @@
+# Environment Variables
+.env
+.env.local
+.env.development
+.env.test
+.env.production
+.env.*
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual Environment
+venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+.venv/
+
+# Node.js / React / Next.js
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+package-lock.json
+yarn.lock
+.pnpm-debug.log*
+.pnpm-store/
+*.tgz
+*.tar.gz
+
+# Next.js build outputs
+.next/
+out/
+frontend/chatbot/.next/
+frontend/chatbot/out/
+
+# React/Vite build outputs
+frontend/dist/
+frontend/build/
+frontend/.vite/
+frontend/.turbo/
+
+# TypeScript
+*.tsbuildinfo
+next-env.d.ts
+
+# PyCharm
+.idea/
+
+# VS Code
+.vscode/
+*.code-workspace
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# Pytest
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Vector Database & AI Models
+# ChromaDB
+vector_store/
+vector_store_backup/
+*.sqlite3.backup
+*.db.backup
+
+# Pinecone (if used)
+pinecone_index/
+
+# Model files
+*.bin
+*.safetensors
+models/
+huggingface_cache/
+
+# Log Files
+*.log
+logs/
+backend.log
+chatbot.log
+app.log
+
+# Database Files (SQLite)
+*.db
+*.sqlite
+*.sqlite3
+backend/chatbot.db
+backend/instance/
+instance/
+
+# Temporary Files
+temp/
+tmp/
+*.tmp
+*.temp
+
+# OS Files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+desktop.ini
+
+# API Keys and Secrets
+secrets.json
+config.json
+credentials.json
+azure_credentials.json
+openai_key.txt
+api_keys.txt
+
+# Azure/Cloud specific
+*.publishsettings
+*.azurePubxml
+.azure/
+
+# WordPress API credentials
+wp_credentials.json
+wordpress_config.json
+
+# Backup files
+*.bak
+*.backup
+*.swp
+*.swo
+*~
+
+# Large files that shouldn't be tracked
+*.pdf
+*.docx
+*.doc
+*.xlsx
+*.xls
+*.pptx
+*.ppt
+
+# Cache directories
+.cache/
+cache/
+.temp/
+
+# Temporary Files
+temp/
+tmp/
+*.tmp
+*.temp
+
+# OS Files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+desktop.ini
+
+# IDE Files
+# PyCharm
+.idea/
+
+# VS Code
+.vscode/
+*.code-workspace
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+coverage/
+
+# Streamlit
+.streamlit/secrets.toml
+secrets.toml
+
+# Vercel
+.vercel
+
+# Deployment
+deploy/
+deployment/
+.vscode-server/
+
+# IDE Server Files (Cursor, Qoder, etc.)
+.cursor/
+.cursor-server/
+.qoder/
+.qoder-server/
+.config/
+
+# Shell and User Config
+.bash_history
+.bash_logout
+.bashrc
+.profile
+.wget-hsts
+.sudo_as_admin_successful
+
+# Package Manager Cache
+.npm/
+.pm2/
+.dotnet/
+
+# Documentation (auto-generated)
+NAMESPACE_MIGRATION_COMPLETE.md
+PINECONE_ACCOUNT_MIGRATION_GUIDE.md
+VIDEO_URL_INTEGRATION_GUIDE.md
+
+# Reference UI (if it's a nested git repo)
+frontend/ref-ui/

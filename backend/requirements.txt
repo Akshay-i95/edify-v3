@@ -1,0 +1,22 @@
+# Flask Backend Dependencies
+Flask>=2.3.0
+Flask-CORS>=4.0.0
+python-dotenv>=1.0.0
+
+# AI/LLM Dependencies
+groq>=0.4.0
+
+# Core ML Dependencies from original app
+sentence-transformers>=2.2.0
+numpy>=1.26.0
+faiss-cpu>=1.7.0
+pinecone>=7.0.0
+requests>=2.31.0
+PyPDF2>=3.0.0
+tiktoken>=0.5.0
+
+# Azure Storage for PDF downloads
+azure-storage-blob>=12.19.0
+
+# Additional utilities
+werkzeug>=2.3.0
