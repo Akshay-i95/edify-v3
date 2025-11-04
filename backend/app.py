@@ -176,6 +176,23 @@ def initialize_system():
 
 # API Routes
 
+@app.route('/', methods=['GET'])
+def root():
+    """Root endpoint - API information"""
+    return jsonify({
+        'message': 'Edify AI Assistant Backend API',
+        'version': '3.0',
+        'status': 'online',
+        'endpoints': {
+            'health': '/api/health',
+            'chat': '/api/chat',
+            'mobile_chat': '/api/mobile/chat',
+            'system_status': '/api/system/status',
+            'file_download': '/api/files/download/<filename>'
+        },
+        'timestamp': datetime.now(timezone.utc).isoformat()
+    })
+
 @app.route('/api/health', methods=['GET'])
 def health_check():
     """Health check endpoint"""

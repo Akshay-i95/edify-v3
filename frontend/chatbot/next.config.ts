@@ -7,8 +7,8 @@ const nextConfig: NextConfig = {
   // Environment-specific configuration
   env: {
     // Backend URL configuration for both client and server side
-    BACKEND_URL: process.env.BACKEND_URL || process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:5000',
-    NEXT_PUBLIC_BACKEND_URL: process.env.NEXT_PUBLIC_BACKEND_URL || process.env.BACKEND_URL || 'http://localhost:5000',
+    BACKEND_URL: process.env.BACKEND_URL || process.env.NEXT_PUBLIC_BACKEND_URL || 'http://45.79.124.136:5000',
+    NEXT_PUBLIC_BACKEND_URL: process.env.NEXT_PUBLIC_BACKEND_URL || process.env.BACKEND_URL || 'http://45.79.124.136:5000',
     
     // App configuration
     NEXT_PUBLIC_APP_ENV: process.env.NEXT_PUBLIC_APP_ENV || process.env.NODE_ENV || 'development',
@@ -18,7 +18,7 @@ const nextConfig: NextConfig = {
   
   // Environment variables exposed to the browser
   publicRuntimeConfig: {
-    backendUrl: process.env.NEXT_PUBLIC_BACKEND_URL || process.env.BACKEND_URL || 'http://localhost:5000',
+    backendUrl: process.env.NEXT_PUBLIC_BACKEND_URL || process.env.BACKEND_URL || 'http://45.79.124.136:5000',
     appEnv: process.env.NEXT_PUBLIC_APP_ENV || process.env.NODE_ENV || 'development',
     enableReasoning: process.env.NEXT_PUBLIC_ENABLE_REASONING === 'true',
     enableSources: process.env.NEXT_PUBLIC_ENABLE_SOURCES === 'true',
