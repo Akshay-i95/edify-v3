@@ -21,6 +21,7 @@ This module provides:
 - Student-friendly response generation
 - Source attribution for educational materials
 - Multi-turn conversation support optimized for educational contexts
+- Namespace validation for grade-level access control
 """
 
 import os
@@ -32,6 +33,14 @@ import random
 from typing import List, Dict, Optional, Any, Tuple
 from datetime import datetime
 import re
+
+# Import namespace validator
+try:
+    from namespace_validator import namespace_validator
+    NAMESPACE_VALIDATION_AVAILABLE = True
+except ImportError as e:
+    NAMESPACE_VALIDATION_AVAILABLE = False
+    logging.warning(f"Namespace validation not available: {str(e)}")
 
 # Import Azure download service
 try:
@@ -380,6 +389,27 @@ class AIChhatbotInterface:
             # Step 3: Query preprocessing with enhanced memory context
             processed_query = self._preprocess_query(user_query, is_follow_up, follow_up_context)
             
+            # Step 3.5: Namespace validation for grade-level access control
+            if NAMESPACE_VALIDATION_AVAILABLE and namespaces:
+                is_valid, validation_error = namespace_validator.validate_query_access(user_query, namespaces)
+                if not is_valid:
+                    self.logger.warning(f"[NAMESPACE VALIDATION] Access denied for query: {user_query[:100]}...")
+                    response_time = time.time() - start_time
+                    return {
+                        'response': validation_error,
+                        'sources': [],
+                        'confidence': 1.0,
+                        'response_time': response_time,
+                        'reasoning': "Access validation failed - user requested content outside their authorized grade levels",
+                        'chunk_count': 0,
+                        'model_used': "namespace_validator",
+                        'is_follow_up': is_follow_up,
+                        'session_stats': self.session_stats.copy(),
+                        'query_type': 'access_denied',
+                        'validation_error': True
+                    }
+                else:
+                    self.logger.info(f"[NAMESPACE VALIDATION] Access granted for namespaces: {namespaces}")
 
             # Step 4: Determine appropriate namespace for search
             search_namespaces = []
