@@ -448,24 +448,56 @@ class AIChhatbotInterface:
                     all_relevant_chunks.extend(chunks)
             
             # Enhanced deduplication: prioritize source diversity
+            self.logger.info(f"[DEBUG] Total chunks retrieved before deduplication: {len(all_relevant_chunks)}")
+            self.logger.info(f"[DEBUG] self.max_context_chunks = {self.max_context_chunks}")
+            unique_files_in_chunks = set()
+            self.logger.info(f"[DEBUG] ALL CHUNKS ANALYSIS:")
+            for i, chunk in enumerate(all_relevant_chunks):  # Log ALL chunks
+                filename = chunk.get('metadata', {}).get('filename', 'unknown')
+                score = chunk.get('score', 0)
+                unique_files_in_chunks.add(filename)
+                if i < 15:  # Only log first 15 to avoid spam
+                    self.logger.info(f"[DEBUG] Chunk {i+1}: {filename} (score: {score:.3f})")
+            self.logger.info(f"[DEBUG] TOTAL chunks: {len(all_relevant_chunks)}, UNIQUE files: {len(unique_files_in_chunks)}")
+            self.logger.info(f"[DEBUG] Unique filenames: {list(unique_files_in_chunks)[:10]}")  # Show first 10 unique files
+            
             seen_ids = set()
             file_sources = set()
             relevant_chunks = []
             
             # First pass: Get one chunk from each unique source file (prioritize diversity)
-            for chunk in sorted(all_relevant_chunks, key=lambda x: x.get('score', 0), reverse=True):
+            self.logger.info(f"[DEBUG] Max context chunks limit: {self.max_context_chunks}")
+            # Temporary override for debugging - force higher limit
+            original_max = self.max_context_chunks
+            self.max_context_chunks = 8  # Temporary override
+            self.logger.info(f"[DEBUG] Overriding max_context_chunks from {original_max} to {self.max_context_chunks}")
+            
+            for i, chunk in enumerate(sorted(all_relevant_chunks, key=lambda x: x.get('score', 0), reverse=True)):
                 chunk_id = chunk.get('id', '')
                 filename = chunk.get('metadata', {}).get('filename', 'unknown')
                 
-                if chunk_id not in seen_ids and filename not in file_sources:
+                self.logger.info(f"[DEBUG] Processing chunk {i+1}: {filename} (ID: {chunk_id[:20]}...)")
+                self.logger.info(f"[DEBUG] Seen IDs: {len(seen_ids)}, File sources: {len(file_sources)}")
+                
+                # Prioritize filename diversity over ID uniqueness (fix for duplicate IDs)
+                if filename not in file_sources:
                     seen_ids.add(chunk_id)
                     file_sources.add(filename)
                     relevant_chunks.append(chunk)
-                    self.logger.info(f"[DEDUP-PASS1] Added chunk from NEW file: {filename}")
+                    self.logger.info(f"[DEDUP-PASS1] Added chunk from NEW file: {filename} (Total: {len(relevant_chunks)})")
                     
-                    # Stop if we have enough diverse sources
-                    if len(relevant_chunks) >= self.max_context_chunks:
+                    # Stop if we have enough diverse sources (get multiple sources for better coverage)
+                    min_sources = 5  # Ensure we get at least 5 different sources
+                    target_chunks = max(self.max_context_chunks, min_sources)
+                    if len(relevant_chunks) >= target_chunks:
+                        self.logger.info(f"[DEBUG] Reached target chunks limit: {len(relevant_chunks)}/{target_chunks}")
                         break
+                else:
+                    self.logger.info(f"[DEBUG] Skipping chunk: duplicate file ({filename})")
+                    
+                if i >= 15:  # Prevent too much logging
+                    self.logger.info(f"[DEBUG] Stopping debug logging after 15 chunks...")
+                    break
             
             # Second pass: Fill remaining slots with best chunks from any source
             remaining_slots = self.max_context_chunks - len(relevant_chunks)
