@@ -423,15 +423,27 @@ class AIChhatbotInterface:
                     else:
                         search_namespaces.append(ns)
             else:
-                # Fall back to automatic namespace determination
-                search_namespace = self._determine_query_namespace(user_query, processed_query)
-                search_namespaces = [search_namespace]
-                if search_namespace in self.KB_NAMESPACE_GROUPS:
-                    group_filters[search_namespace] = self.KB_NAMESPACE_GROUPS[search_namespace]
+                # Search all available namespaces by default for comprehensive access
+                all_available_namespaces = [
+                    'kb-esp', 'kb-psp', 'kb-msp', 'kb-ssp',  # All KB namespaces
+                    'edipedia-k12', 'edipedia-preschools', 'edipedia-edifyho'  # All Edipedia namespaces
+                ]
+                search_namespaces = all_available_namespaces
+                
+                # Set group filters for KB namespaces
+                for ns in search_namespaces:
+                    if ns in self.KB_NAMESPACE_GROUPS:
+                        group_filters[ns] = self.KB_NAMESPACE_GROUPS[ns]
+                
+                self.logger.info(f"[DEFAULT ACCESS] Searching all namespaces: {search_namespaces}")
 
             # Step 5: Retrieve relevant chunks from specified namespaces, enforcing group restrictions
             all_relevant_chunks = []
+            namespace_chunk_count = {}  # Track chunks per namespace for balanced retrieval
+            
             for namespace in search_namespaces:
+                namespace_chunks = []
+                
                 # If this is a kb-* namespace, restrict retrieval to its group only
                 if namespace in self.KB_NAMESPACE_GROUPS:
                     group_grades = self.KB_NAMESPACE_GROUPS[namespace]
@@ -442,11 +454,23 @@ class AIChhatbotInterface:
                         )
                         # Filter chunks to only those matching the grade in metadata
                         filtered_chunks = [c for c in chunks if c.get('metadata', {}).get('grade', '').lower() == grade.lower()]
-                        all_relevant_chunks.extend(filtered_chunks)
+                        namespace_chunks.extend(filtered_chunks)
                 else:
                     # For edipedia-* and others, no group restriction
                     chunks = self._retrieve_relevant_chunks(processed_query, is_follow_up, follow_up_context, namespace, query_complexity)
-                    all_relevant_chunks.extend(chunks)
+                    namespace_chunks.extend(chunks)
+                
+                # Limit chunks per namespace to prevent overwhelming results when searching all
+                max_chunks_per_namespace = max(3, self.max_context_chunks // len(search_namespaces))
+                if len(namespace_chunks) > max_chunks_per_namespace:
+                    # Sort by score and take top chunks
+                    namespace_chunks.sort(key=lambda x: x.get('score', 0), reverse=True)
+                    namespace_chunks = namespace_chunks[:max_chunks_per_namespace]
+                
+                all_relevant_chunks.extend(namespace_chunks)
+                namespace_chunk_count[namespace] = len(namespace_chunks)
+            
+            self.logger.info(f"[RETRIEVAL] Chunks per namespace: {namespace_chunk_count}")
             
             # Enhanced deduplication: prioritize source diversity
             self.logger.info(f"[DEBUG] Total chunks retrieved before deduplication: {len(all_relevant_chunks)}")
