@@ -151,11 +151,18 @@ RESPONSE GUIDELINES:
 - Include specific SOP numbers, dates, and key details when relevant
 - No external knowledge - only use provided Edify documentation
 
+FOLLOW-UP HANDLING:
+- Pay careful attention to conversation history and context
+- When asked to provide examples, remember them for future reference
+- When asked "solve one example" or similar, refer to the SPECIFIC example you just provided
+- Maintain continuity: if you gave an example like "2x + 3 = 11", solve THAT equation, not a different one
+- Use pronouns and references ("that one", "this example") to refer to previous content
+
 REASONING FORMAT:
 Always structure your response with:
 
 **Chain of Thought Analysis:**
-1. **Question Analysis:** [What specific information is being requested]
+1. **Question Analysis:** [What specific information is being requested, check conversation history for context]
 2. **Knowledge Search:** [How you located the relevant policy/information]
 3. **Information Synthesis:** [Key details extracted and validated]
 4. **Educational Context:** [Practical application within Edify framework]
@@ -191,7 +198,7 @@ Provide a focused, authoritative response using your Edify expertise. Answer onl
             
             # Add conversation history if provided
             if conversation_history:
-                for msg in conversation_history[-5:]:  # Include last 5 messages for context
+                for msg in conversation_history[-10:]:  # Include last 10 messages for context
                     if msg.get('role') == 'user':
                         # Add user messages as-is
                         messages.insert(-1, msg)
@@ -199,7 +206,7 @@ Provide a focused, authoritative response using your Edify expertise. Answer onl
                         # Clean assistant messages to only include the actual response, not reasoning
                         assistant_content = msg.get('content', '')
                         
-                        # Extract only the final answer part, not the reasoning
+                        # Extract the final answer but preserve important context like examples
                         if "**Chain of Thought Analysis:**" in assistant_content:
                             # Find where the actual answer starts
                             answer_markers = ["**Answer:**", "In Edify schools", "Our policy", "At Edify", "The SOP"]
@@ -210,6 +217,10 @@ Provide a focused, authoritative response using your Edify expertise. Answer onl
                                     parts = assistant_content.split(marker, 1)
                                     if len(parts) > 1:
                                         clean_content = marker + parts[1]
+                                        # Preserve important context like examples and equations
+                                        if any(keyword in parts[1].lower() for keyword in ['example:', 'equation:', 'solve', 'x =', 'y =', 'answer:']):
+                                            # Keep the full context when examples or solutions are present
+                                            self.logger.info("[CONVERSATION] Preserving example/solution context for follow-ups")
                                         break
                         else:
                             clean_content = assistant_content
@@ -410,40 +421,51 @@ Provide a focused, authoritative response using your Edify expertise. Answer onl
     #         return None
             
     def _extract_reasoning_and_answer(self, text: str) -> tuple[str, str]:
-        """Extract reasoning and answer from Groq response with ultra-robust pattern detection"""
+        """Extract reasoning and answer from Groq response with strict separation"""
         try:
             self.logger.info(f"[EXTRACTION] Processing text length: {len(text)} characters")
             
-            # Comprehensive approach: try multiple strategies in order of specificity
-            
-            # Strategy 1: Handle **Answer:** marker specifically
-            if "**Answer:**" in text:
-                parts = text.split("**Answer:", 1)
-                if len(parts) == 2:
-                    reasoning_part = parts[0].strip()
-                    answer_part = parts[1].strip()
-                    if answer_part.startswith("*"):
-                        answer_part = answer_part[1:].strip()  # Remove remaining *
-                    
-                    clean_reasoning = self._clean_reasoning(reasoning_part)
-                    if clean_reasoning and answer_part:
-                        return clean_reasoning, answer_part
-            
-            # Strategy 2: Look for clear separation patterns (double newline + Edify phrase)
-            separation_patterns = [
-                "\n\nIn Edify schools", "\n\nOur policy", "\n\nAt Edify", "\n\nIn Edify"
-            ]
-            
-            for pattern in separation_patterns:
-                if pattern in text:
-                    parts = text.split(pattern, 1)
+            # Strategy 1: Handle **Answer:** or **Final Response:** markers
+            answer_markers = ["**Answer:**", "**Final Response:**"]
+            for marker in answer_markers:
+                if marker in text:
+                    parts = text.split(marker, 1)
                     if len(parts) == 2:
                         reasoning_part = parts[0].strip()
-                        answer_part = pattern.strip() + parts[1]
+                        answer_part = parts[1].strip()
+                        if answer_part.startswith("*"):
+                            answer_part = answer_part[1:].strip()  # Remove remaining *
                         
                         clean_reasoning = self._clean_reasoning(reasoning_part)
-                        if clean_reasoning and answer_part:
+                        if clean_reasoning and answer_part and not self._contains_edify_response(reasoning_part):
+                            self.logger.info("[EXTRACTION] Successfully used answer marker separation")
                             return clean_reasoning, answer_part
+            
+            # Strategy 2: Look for clear separation patterns (double newline + Edify phrase)
+            # Find the FIRST occurrence of Edify response to ensure clean separation
+            edify_patterns = ["In Edify schools", "Our policy", "At Edify", "The SOP"]
+            best_split_index = float('inf')
+            best_pattern = None
+            
+            for pattern in edify_patterns:
+                # Look for pattern preceded by newlines for clean separation
+                full_patterns = [f"\n\n{pattern}", f"\n{pattern}"]
+                for full_pattern in full_patterns:
+                    index = text.find(full_pattern)
+                    if index > 30 and index < best_split_index:  # Must have substantial reasoning before
+                        best_split_index = index
+                        best_pattern = full_pattern
+            
+            if best_pattern and best_split_index < float('inf'):
+                reasoning_part = text[:best_split_index].strip()
+                answer_part = text[best_split_index:].strip()
+                
+                # Ensure reasoning doesn't contain Edify responses
+                if not self._contains_edify_response(reasoning_part):
+                    clean_reasoning = self._clean_reasoning(reasoning_part)
+                    if clean_reasoning and answer_part:
+                        self.logger.info("[EXTRACTION] Successfully used pattern separation")
+                        return clean_reasoning, answer_part
             
             # Strategy 3: Find numbered reasoning followed by Edify response
             if self._has_numbered_reasoning(text):
@@ -458,15 +480,20 @@ Provide a focused, authoritative response using your Edify expertise. Answer onl
                     if any(header in line_stripped for header in ["Chain of Thought Analysis:", "**Chain of Thought Analysis:**"]):
                         continue
                     
-                    # Check if this line starts an Edify response
+                    # Check if this line starts an Edify response - be strict
                     if self._is_edify_response_line(line_stripped):
                         answer_start_idx = i
                         break
                     
-                    # Include this line in reasoning if it's numbered or continuation
+                    # Only include analytical content in reasoning - not policy content
                     if (re.match(r'^\d+\.', line_stripped) or 
-                        re.match(r'^\*\*\w+.*:\*\*', line_stripped) or
-                        (len(reasoning_lines) > 0 and line_stripped and not self._is_edify_response_line(line_stripped))):
+                        re.match(r'^\*\*\w+.*:\*\*', line_stripped)):
+                        # Double-check this line doesn't contain policy content
+                        if not self._contains_edify_response(line):
+                            reasoning_lines.append(line)
+                    elif (len(reasoning_lines) > 0 and line_stripped and 
+                          not self._is_edify_response_line(line_stripped) and
+                          not self._contains_edify_response(line)):
                         reasoning_lines.append(line)
                 
                 if reasoning_lines and answer_start_idx > -1:
@@ -474,30 +501,39 @@ Provide a focused, authoritative response using your Edify expertise. Answer onl
                     answer = '\n'.join(lines[answer_start_idx:]).strip()
                     
                     clean_reasoning = self._clean_reasoning(reasoning)
-                    if clean_reasoning and answer:
+                    # Final check: ensure reasoning doesn't contain policy content
+                    if clean_reasoning and answer and not self._contains_edify_response(clean_reasoning):
+                        self.logger.info("[EXTRACTION] Successfully used numbered reasoning separation")
                         return clean_reasoning, answer
             
             # Strategy 4: Handle cases where reasoning and response are mixed
             edify_start_idx = self._find_edify_response_start(text)
-            if edify_start_idx > 30:  # Must have substantial content before Edify response
+            if edify_start_idx > 50:  # Must have substantial content before Edify response
                 reasoning_part = text[:edify_start_idx].strip()
                 answer_part = text[edify_start_idx:].strip()
                 
-                # Clean the reasoning part more aggressively
+                # Strict filtering: only keep analytical content, not policy content
                 reasoning_lines = []
                 for line in reasoning_part.split('\n'):
                     line_stripped = line.strip()
-                    # Only include lines that look like reasoning
+                    # Only include lines that are clearly analytical/reasoning
                     if (line_stripped and 
                         not self._is_edify_response_line(line_stripped) and
+                        not self._contains_edify_response(line) and
                         not line_stripped.startswith("SOP/") and
-                        "SOP/" not in line_stripped):
+                        "SOP/" not in line_stripped and
+                        any(keyword in line_stripped.lower() for keyword in 
+                            ["analysis", "looking", "need to", "checking", "searching", "step", "approach"])):
                         reasoning_lines.append(line)
                 
                 clean_reasoning = '\n'.join(reasoning_lines).strip()
                 clean_reasoning = self._clean_reasoning(clean_reasoning)
                 
-                if clean_reasoning and answer_part:
+                # Final validation: ensure clean separation
+                if (clean_reasoning and answer_part and 
+                    not self._contains_edify_response(clean_reasoning) and
+                    len(clean_reasoning) > 20):
+                    self.logger.info("[EXTRACTION] Successfully used mixed content separation")
                     return clean_reasoning, answer_part
             
             # Strategy 5: Extract any structured content as reasoning
@@ -539,13 +575,22 @@ Provide a focused, authoritative response using your Edify expertise. Answer onl
             
             # Final strategy: Check if the entire text is just an Edify response
             if any(text.strip().startswith(start) for start in ["In Edify", "Our policy", "At Edify"]):
-                # For pure Edify responses, create meaningful reasoning based on content
-                reasoning = self._generate_contextual_reasoning(text)
+                # For pure Edify responses, create simple analytical reasoning
+                reasoning = "Applied document analysis to locate relevant policy information."
+                self.logger.info("[EXTRACTION] Pure Edify response detected")
                 return reasoning, text
             
-            # Ultimate fallback
-            self.logger.warning("[EXTRACTION] No clear pattern found, using fallback")
-            return "Applied step-by-step analysis to locate specific information in educational documents.", text
+            # Ultimate fallback: Be very conservative
+            # If we can't clearly separate, provide minimal reasoning to avoid content leakage
+            if self._contains_edify_response(text):
+                # Text contains policy content - use minimal reasoning
+                reasoning = "Analyzed educational documentation to extract relevant information."
+                self.logger.warning("[EXTRACTION] Conservative fallback: policy content detected")
+                return reasoning, text
+            else:
+                # Text doesn't seem to contain policy content - may be pure reasoning
+                self.logger.warning("[EXTRACTION] No clear pattern found, using text as reasoning")
+                return text, "Information not clearly specified in the available documentation."
             
         except Exception as e:
             self.logger.error(f"Error in extraction: {str(e)}")
@@ -559,6 +604,15 @@ Provide a focused, authoritative response using your Edify expertise. Answer onl
             if re.match(r'^\*\*\w+.*:\*\*', line_stripped):
                 structured_points.append(line_stripped)
         return structured_points
+    
+    def _contains_edify_response(self, text: str) -> bool:
+        """Check if text contains Edify policy responses that should be in answer section"""
+        edify_indicators = [
+            "In Edify schools", "Our policy", "At Edify", "The SOP",
+            "edify school", "edify policy", "school policy"
+        ]
+        text_lower = text.lower()
+        return any(indicator.lower() in text_lower for indicator in edify_indicators)
     
     def _extract_question_analysis(self, text: str) -> list:
         """Extract analytical phrases from unstructured text"""

@@ -382,12 +382,13 @@ class AIChhatbotInterface:
             query_complexity = self._analyze_query_complexity(user_query)
             self.logger.info(f"[COMPLEXITY] Query complexity: {query_complexity}")
             
-            # Step 2: Simple follow-up detection using frontend message history
-            is_follow_up, follow_up_context = self._detect_follow_up_from_messages(user_query, conversation_messages)
-            self.logger.info(f"[FOLLOW-UP] Detected: {is_follow_up}, Messages: {len(conversation_messages)}")
+            # Step 2: Simple conversation context check (ChatGPT-style)
+            is_follow_up = len(conversation_messages) > 1  # Simple check: if there's conversation history
+            follow_up_context = None  # Let LLM handle context naturally
+            self.logger.info(f"[CONVERSATION] History: {len(conversation_messages)} messages, Context enabled: {is_follow_up}")
             
-            # Step 3: Query preprocessing with enhanced memory context
-            processed_query = self._preprocess_query(user_query, is_follow_up, follow_up_context)
+            # Step 3: Simple query preprocessing (let LLM handle conversation context)
+            processed_query = user_query.strip()  # Simple preprocessing - LLM will handle context
             
             # Step 3.5: Namespace validation for grade-level access control
             if NAMESPACE_VALIDATION_AVAILABLE and namespaces:
@@ -547,7 +548,7 @@ class AIChhatbotInterface:
             optimized_context = self._optimize_context_for_llm(relevant_chunks, processed_query)
             
             # Step 6: Generate response with follow-up context
-            response = self._generate_llm_response(processed_query, optimized_context, is_follow_up, follow_up_context)
+            response = self._generate_llm_response(processed_query, optimized_context, is_follow_up, follow_up_context, conversation_messages)
             
             # Step 7: Add citations and source attribution
             if self.enable_citations:
@@ -1239,6 +1240,55 @@ class AIChhatbotInterface:
             return 'general'
 
     
+    def _prepare_conversation_history(self, messages: List[Dict]) -> List[Dict]:
+        """
+        Convert frontend messages to LLM-compatible format for ChatGPT-style conversation memory.
+        Takes last 10 messages to provide natural conversation context.
+        """
+        if not messages:
+            return []
+        
+        conversation_history = []
+        
+        # Take the last 10 messages (excluding the current query)
+        recent_messages = messages[-10:] if len(messages) > 10 else messages
+        
+        for msg in recent_messages:
+            role = msg.get('role', '')
+            content = msg.get('content', '')
+            
+            # Skip empty messages
+            if not content or not role:
+                continue
+                
+            # Handle different content formats from frontend
+            if isinstance(content, list) and len(content) > 0:
+                # Extract text from array format
+                text_content = ""
+                for item in content:
+                    if isinstance(item, dict) and item.get('type') == 'text':
+                        text_content += item.get('text', '')
+                    elif isinstance(item, str):
+                        text_content += item
+                content = text_content
+            elif not isinstance(content, str):
+                content = str(content)
+            
+            # Clean up content
+            content = content.strip()
+            if len(content) < 3:  # Skip very short messages
+                continue
+            
+            # Add to conversation history in LLM format
+            if role in ['user', 'assistant']:
+                conversation_history.append({
+                    'role': role,
+                    'content': content
+                })
+        
+        self.logger.info(f"[CONVERSATION MEMORY] Prepared {len(conversation_history)} messages for LLM context")
+        return conversation_history
+    
     def _extract_semantic_topic(self, content: str) -> str:
         """Extract the main semantic topic from previous response"""
         try:
@@ -1755,7 +1805,7 @@ class AIChhatbotInterface:
         else:
             return 'MODERATE'
 
-    def _generate_llm_response(self, query: str, context: str, is_follow_up: bool = False, follow_up_context: Dict = None) -> str:
+    def _generate_llm_response(self, query: str, context: str, is_follow_up: bool = False, follow_up_context: Dict = None, conversation_messages: List[Dict] = None) -> str:
         """Generate response using LLM service with optimized context"""
         try:
             # Determine if a short response is requested - Default to comprehensive for Edify expertise
@@ -1772,68 +1822,29 @@ class AIChhatbotInterface:
                 try:
                     self.logger.info("Using LLM service for response generation...")
                     
-                    # Enhance the query and context for follow-up questions
-                    enhanced_query = query
-                    enhanced_context = context
-                    
-                    if is_follow_up and follow_up_context:
-                        self.logger.info("[FOLLOW-UP] Enhancing LLM prompt with conversation context")
-                        
-                        # Extract previous question and response for context
-                        previous_question = follow_up_context.get('previous_question', '')
-                        previous_response = follow_up_context.get('previous_response', '')
-                        previous_topic = follow_up_context.get('previous_topic', '')
-                        
-                        # Use our specialized pronoun resolution method
-                        pronoun_info = self._resolve_pronouns(query, previous_question, previous_response)
-                        
-                        # Get the context for the prompt
-                        pronoun_context = pronoun_info.get("pronoun_context", "")
-                        
-                        # Add follow-up instructions to the query with pronoun resolution if needed
-                        follow_up_instruction = (
-                            f"CRITICAL FOLLOW-UP INSTRUCTION: You MUST extract and use ALL relevant information from the provided educational documents. "
-                            f"NEVER say you cannot find information if ANY content relates to the query. "
-                            f"This is a follow-up question to a previous conversation. "
-                            f"Previous topic: {follow_up_context.get('previous_topic', '')} "
-                            f"Previous question: {previous_question} "
-                            f"{pronoun_context} "
-                            f"The user is asking for more information related to the previous topic. "
-                            f"Your task: Extract specific details, methods, strategies, examples, and insights from the documents. "
-                            f"Even if the documents don't perfectly match the follow-up question, find related educational principles and adapt them. "
-                            f"Provide comprehensive, actionable guidance based on the document content. "
-                            f"Current question: {query}"
-                        )
-                        enhanced_query = follow_up_instruction
-                        
-                        # Add previous response context if available
-                        if follow_up_context.get('previous_response'):
-                            enhanced_context = f"Previous response context: {follow_up_context['previous_response'][:300]}\\n\\n{context}"
-                    elif should_be_concise:
-                        # Add instruction for conciseness even for non-follow-up questions
+                    # Smart query enhancement - preserve follow-up context
+                    if is_follow_up and any(word in query.lower() for word in ['solve', 'example', 'that', 'this', 'one']):
+                        # For follow-ups about examples/solutions, preserve the natural query
+                        enhanced_query = f"Use conversation history to understand what the user is referring to. {query}"
+                        self.logger.info("[FOLLOW-UP] Preserving natural query for context continuity")
+                    else:
+                        # For new questions, use document extraction approach
                         enhanced_query = (
                             f"EXTRACT AND USE: Find ALL relevant information from the educational documents provided. "
                             f"NEVER refuse to answer if ANY content relates to the topic. "
                             f"Extract specific details, strategies, or examples from the documents. "
                             f"Provide a clear, actionable answer based on document content. "
-                            f"Be comprehensive and provide detailed guidance from Edify expertise. "
-                            f"Question: {query}"
-                        )
-                    else:
-                        # For verbose responses - AGGRESSIVE CONTENT EXTRACTION
-                        enhanced_query = (
-                            f"CRITICAL INSTRUCTION: You MUST extract and use ALL relevant information from the provided educational documents. "
-                            f"NEVER say you cannot find information if ANY content relates to the query. "
-                            f"Your task: Extract specific details, methods, strategies, examples, and insights from the documents. "
-                            f"Even if the documents don't perfectly match the question, find related educational principles and adapt them. "
-                            f"Provide comprehensive, actionable guidance based on the document content. "
+                            f"Use conversation history to understand context and references naturally. "
                             f"Question: {query}"
                         )
                     
+                    # Convert frontend messages to LLM format for conversation history
+                    conversation_history = self._prepare_conversation_history(conversation_messages or [])
+                    
                     llm_response = self.llm_service.generate_response(
                         query=enhanced_query,
-                        context=enhanced_context,
-                        conversation_history=[]
+                        context=context,  # Use simple context - LLM handles conversation naturally
+                        conversation_history=conversation_history
                     )
                     
                     if llm_response.get('response'):
@@ -2743,7 +2754,7 @@ class AIChildrensChatbotInterface:
 
 
     def _get_display_name_from_filename(self, filename: str) -> str:
-        """Extract a user-friendly display name from a filename"""
+        """Extract a user-friendly display name from a filename using only metadata"""
         try:
             # Remove file extension
             if '.' in filename:
@@ -2751,37 +2762,9 @@ class AIChildrensChatbotInterface:
             else:
                 base_name = filename
                 
-            # Extract UUID from path if present
+            # Extract last part of path if present
             if '/' in base_name or '\\' in base_name:
-                # Get the last part of the path
-                path_parts = base_name.replace('\\', '/').split('/')
-                base_name = path_parts[-1]
-                
-                # Determine document type from path
-                path_str = '/'.join(path_parts[:-1]).lower()
-                if 'k12' in path_str:
-                    doc_type = "K12 Document"
-                elif 'preschool' in path_str:
-                    doc_type = "Preschool Document"
-                elif 'edifyho' in path_str or 'administrative' in path_str or 'admin' in path_str:
-                    doc_type = "Administrative Document"
-                else:
-                    doc_type = "Document"
-                    
-                # If it's a UUID, return a meaningful name
-                if len(base_name) == 36 and base_name.count('-') == 4:
-                    # Extract first 8 characters of UUID for reference
-                    uuid_short = base_name[:8]
-                    return f"{doc_type} {uuid_short}"
-                    
-            # Handle UUID-style filenames (full UUID)
-            if len(base_name) == 36 and base_name.count('-') == 4:
-                uuid_short = base_name[:8]
-                return f"Document {uuid_short}"
-                
-            # Handle shortened UUID (8 characters)
-            if len(base_name) == 8 and base_name.isalnum():
-                return f"Document {base_name}"
+                base_name = base_name.replace('\\', '/').split('/')[-1]
                 
             # Convert underscores and dashes to spaces for regular filenames
             display_name = base_name.replace('_', ' ').replace('-', ' ')
@@ -2803,7 +2786,7 @@ class AIChildrensChatbotInterface:
             return "Document"
     
     def _format_sources(self, chunks: List[Dict]) -> List[Dict]:
-        """Format source information for response with download URLs and original filenames"""
+        """Format source information for response using only metadata without UUID processing"""
         try:
             # First, try to enhance document metadata if enhanced service is available
             if self.enhanced_metadata_service:
@@ -2824,78 +2807,62 @@ class AIChildrensChatbotInterface:
                     self.logger.warning(f"[WARNING] Enhanced metadata processing failed: {str(e)}")
                     # Continue with original chunks
             
-            # Extract unique filenames from chunks
+            # Extract unique filenames from chunks using full filename as key
             file_sources = {}
             
             for chunk in chunks:
                 # Extract filename from chunk metadata
                 filename = chunk.get('metadata', {}).get('filename', '')
                 
-                if filename:
-                    # Extract UUID from filename (last part of path before extension)
-                    file_uuid = None
-                    if '/' in filename:
-                        base_filename = filename.split('/')[-1]
-                    else:
-                        base_filename = filename
+                if filename and filename not in file_sources:
+                    # Initialize source entry using filename as key
+                    source_entry = {
+                        'filename': filename,
+                        'original_filename': None,
+                        'title': None,
+                        'download_url': None,
+                        'metadata': {},
+                        'chunk_metadata': chunk.get('metadata', {})
+                    }
                     
-                    # Remove extension and get UUID
-                    if '.' in base_filename:
-                        file_uuid = base_filename.split('.')[0]
-                    else:
-                        file_uuid = base_filename
+                    # Use improved metadata service for all metadata needs
+                    enhanced_metadata = self.enhanced_metadata_service.enhance_chunk_metadata(chunk.get('metadata', {}))
                     
-                    if file_uuid and file_uuid not in file_sources:
-                        # Initialize source entry
-                        source_entry = {
-                            'filename': filename,
-                            'file_uuid': file_uuid,
-                            'original_filename': None,
-                            'title': None,
-                            'download_url': None,
-                            'metadata': {},
-                            'chunk_metadata': chunk.get('metadata', {})
+                    source_entry.update({
+                        'original_filename': enhanced_metadata.get('original_filename'),
+                        'title': enhanced_metadata.get('document_title'),
+                        'display_name': enhanced_metadata.get('display_name'),
+                        'metadata': {
+                            'department': enhanced_metadata.get('department', 'Unknown'),
+                            'school_types': enhanced_metadata.get('school_types', []),
+                            'document_type': enhanced_metadata.get('document_type', 'unknown'),
+                            'metadata_source': enhanced_metadata.get('metadata_source', 'fallback'),
+                            'match_confidence': enhanced_metadata.get('match_confidence', 0.0),
+                            'match_strategy': enhanced_metadata.get('match_strategy', 'unknown')
                         }
-                        
-                        # Use improved metadata service for all metadata needs
-                        enhanced_metadata = self.enhanced_metadata_service.enhance_chunk_metadata(chunk.get('metadata', {}))
-                        
-                        source_entry.update({
-                            'original_filename': enhanced_metadata.get('original_filename'),
-                            'title': enhanced_metadata.get('document_title'),
-                            'display_name': enhanced_metadata.get('display_name'),
-                            'metadata': {
-                                'department': enhanced_metadata.get('department', 'Unknown'),
-                                'school_types': enhanced_metadata.get('school_types', []),
-                                'document_type': enhanced_metadata.get('document_type', 'unknown'),
-                                'metadata_source': enhanced_metadata.get('metadata_source', 'fallback'),
-                                'match_confidence': enhanced_metadata.get('match_confidence', 0.0),
-                                'match_strategy': enhanced_metadata.get('match_strategy', 'unknown')
-                            }
-                        })
-                        
-                        self.logger.debug(f"[ENHANCED] Enhanced metadata for {file_uuid}: {enhanced_metadata.get('display_name')} (confidence: {enhanced_metadata.get('match_confidence', 0.0):.3f})")
-                        
-                        # Generate download URL using Azure blob service
-                        if self.azure_service:
-                            try:
-                                download_url = self.azure_service.generate_download_url(filename)
-                                source_entry['download_url'] = download_url
-                                self.logger.debug(f"[DOWNLOAD] Generated URL for {filename}")
-                            except Exception as e:
-                                self.logger.warning(f"[WARNING] Failed to generate download URL for {filename}: {str(e)}")
-                        
-                        file_sources[file_uuid] = source_entry
+                    })
+                    
+                    self.logger.debug(f"[ENHANCED] Enhanced metadata for {filename}: {enhanced_metadata.get('display_name')} (confidence: {enhanced_metadata.get('match_confidence', 0.0):.3f})")
+                    
+                    # Generate download URL using Azure blob service
+                    if self.azure_service:
+                        try:
+                            download_url = self.azure_service.generate_download_url(filename)
+                            source_entry['download_url'] = download_url
+                            self.logger.debug(f"[DOWNLOAD] Generated URL for {filename}")
+                        except Exception as e:
+                            self.logger.warning(f"[WARNING] Failed to generate download URL for {filename}: {str(e)}")
+                    
+                    file_sources[filename] = source_entry
             
             # Format sources for response
             formatted_sources = []
-            for file_uuid, source_info in file_sources.items():
+            for filename, source_info in file_sources.items():
                 # Use the display name from improved metadata service
                 display_name = source_info.get('display_name') or source_info.get('title') or source_info.get('original_filename')
                 
                 # Fallback processing if no metadata available
                 if not display_name:
-                    filename = source_info['filename']
                     display_name = self._get_display_name_from_filename(filename)
                 
                 # Extract chunk metadata for additional info
@@ -2904,12 +2871,11 @@ class AIChildrensChatbotInterface:
                 # Create source object with comprehensive information
                 source = {
                     'name': display_name,
-                    'filename': display_name,  # For compatibility
+                    'filename': filename,  # Use actual filename for downloads
                     'url': source_info.get('download_url'),
                     'download_url': source_info.get('download_url'),
                     'download_available': bool(source_info.get('download_url')),
-                    'file_id': file_uuid,
-                    'chunk_filename': source_info['filename'],
+                    'chunk_filename': filename,
                     'metadata': source_info.get('metadata', {}),
                     
                     # Additional metadata from chunks

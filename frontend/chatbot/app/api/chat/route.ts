@@ -270,22 +270,31 @@ export async function POST(req: Request) {
             }
           }
           
-          // 2. Add reasoning section first with ChatGPT-style collapsible dropdown
-          if (reasoning?.trim()) {
+          // 2. Add reasoning section first - but only if complete and meaningful
+          if (reasoning?.trim() && reasoning.length > 30) {
             console.log('🧠 Adding reasoning to response, length:', reasoning.length, 'characters');
             console.log('🧠 Raw reasoning content (first 800 chars):', reasoning.substring(0, 800));
             
             // Process reasoning content for better structure
             let processedReasoning = reasoning.trim();
             
-            // First, protect existing HTML/structured content by converting line breaks to placeholders
+            // Clean up reasoning content and ensure it's complete
             const lines = processedReasoning.split('\n');
             let formattedLines: string[] = [];
             
             console.log('🧠 Total lines in reasoning:', lines.length);
+            console.log('🧠 First 500 chars of raw reasoning:', processedReasoning.substring(0, 500));
             
             // Track which steps we've found
             const stepsFound: number[] = [];
+            let hasIncompleteReasoning = false;
+            
+            // Check if reasoning starts with step 2 or higher (indicating missing steps)
+            const firstStepMatch = processedReasoning.match(/^(\d+)[\.\)\:]\s+/);
+            if (firstStepMatch && parseInt(firstStepMatch[1]) > 1) {
+              hasIncompleteReasoning = true;
+              console.log('⚠️ Reasoning appears incomplete, starts with step:', firstStepMatch[1]);
+            }
             
             for (let i = 0; i < lines.length; i++) {
               const line = lines[i];
@@ -313,7 +322,7 @@ export async function POST(req: Request) {
               } else if (trimmedLine.startsWith('# ')) {
                 formattedLines.push(`<div style="font-weight: 700; font-size: 17px; color: #0a7a5c; margin: 20px 0 12px 0;">${trimmedLine.substring(2)}</div>`);
               }
-              // Convert numbered lists (1., 2., 3., etc.) - More flexible pattern
+              // Convert numbered lists (1., 2., 3., etc.) - Clean black/white styling
               else if (/^\d+[\.\)\:]\s+/.test(trimmedLine)) {
                 const match = trimmedLine.match(/^(\d+)[\.\)\:]\s+(.*)$/);
                 if (match) {
@@ -321,7 +330,7 @@ export async function POST(req: Request) {
                   
                   // Skip if content is empty
                   if (!content || !content.trim()) {
-                    formattedLines.push(`<div style="margin-left: 20px; padding: 8px 12px; border-left: 3px solid #10a37f; margin-top: 8px; margin-bottom: 8px; background: rgba(16, 163, 127, 0.03);"><span style="font-weight: 700; color: #10a37f; font-size: 15px;">${number}.</span></div>`);
+                    formattedLines.push(`<div style="margin-left: 20px; padding: 8px 12px; border-left: 3px solid #6b7280; margin-top: 8px; margin-bottom: 8px; background: transparent; border: 1px solid #e5e7eb; border-radius: 6px;"><span style="font-weight: 700; color: #6b7280; font-size: 15px;">${number}.</span></div>`);
                     continue;
                   }
                   
@@ -331,8 +340,8 @@ export async function POST(req: Request) {
                     .replace(/\*(.+?)\*/g, '<em style="font-style: italic; color: #4b5563;">$1</em>')
                     .replace(/`(.+?)`/g, '<code style="background: #f3f4f6; padding: 2px 6px; border-radius: 4px; font-family: monospace; font-size: 13px; color: #e11d48;">$1</code>');
                   
-                  formattedLines.push(`<div style="margin-left: 20px; padding: 8px 12px; border-left: 3px solid #10a37f; margin-top: 8px; margin-bottom: 8px; background: rgba(16, 163, 127, 0.03);"><span style="font-weight: 700; color: #10a37f; font-size: 15px;">${number}.</span> <span style="color: #1f2937;">${formattedContent}</span></div>`);
-                  console.log(`✅ Formatted step ${number}`);
+                  formattedLines.push(`<div style="margin-left: 20px; padding: 8px 12px; border-left: 3px solid #6b7280; margin-top: 8px; margin-bottom: 8px; background: transparent; border: 1px solid #e5e7eb; border-radius: 6px;"><span style="font-weight: 700; color: #6b7280; font-size: 15px;">${number}.</span> <span style="color: #1f2937;">${formattedContent}</span></div>`);
+                  console.log(`✅ Formatted step ${number} with clean styling`);
                 }
               }
               // Convert bullet points
@@ -360,21 +369,40 @@ export async function POST(req: Request) {
             console.log('🧠 Processed reasoning HTML length:', processedReasoning.length);
             console.log('🧠 Steps found:', stepsFound.sort((a, b) => a - b));
             
-            // Warn if step 1 or 2 is missing
+            // Warn if step 1 or 2 is missing and handle incomplete reasoning
+            let shouldDisplayReasoning = true;
             if (stepsFound.length > 0) {
               if (!stepsFound.includes(1)) {
                 console.warn('⚠️ Step 1 is missing from reasoning!');
+                if (hasIncompleteReasoning) {
+                  shouldDisplayReasoning = false;
+                  console.log('🚫 Skipping incomplete reasoning display');
+                }
               }
               if (!stepsFound.includes(2) && stepsFound.length > 1) {
                 console.warn('⚠️ Step 2 is missing from reasoning!');
               }
             }
             
-            // Create a simple collapsible reasoning section (similar to thinking dots)
-            const reasoningHtml = `
+            // Only display reasoning if it's complete or meaningful
+            if (!shouldDisplayReasoning) {
+              console.log('🚫 Reasoning skipped due to incompleteness');
+              // Continue without reasoning - just add a small separator
+              await sendChunk('\n', 10);
+            } else {
+              // Create a clean reasoning dropdown without extra container
+              const reasoningHtml = `
 <style>
-  .simple-reasoning-summary {
-    padding: 8px 0;
+  .clean-reasoning-details {
+    margin: 16px 0;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', 'Ubuntu', 'Cantarell', sans-serif;
+    border-radius: 8px;
+    overflow: hidden;
+    background: transparent;
+  }
+  
+  .clean-reasoning-summary {
+    padding: 12px 0;
     cursor: pointer;
     font-size: 14px;
     color: #6b7280;
@@ -385,60 +413,245 @@ export async function POST(req: Request) {
     border: none;
     outline: none;
     transition: all 0.2s ease;
+    background: transparent;
+    width: 100%;
+    text-align: left;
   }
-  .simple-reasoning-summary:hover {
+  
+  .clean-reasoning-summary:hover {
     color: #374151;
   }
-  .simple-reasoning-chevron {
+  
+  .clean-reasoning-summary:focus-visible {
+    outline: 2px solid #3b82f6;
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+  
+  @media (prefers-color-scheme: dark) {
+    .clean-reasoning-summary {
+      color: #9ca3af;
+    }
+    .clean-reasoning-summary:hover {
+      color: #d1d5db;
+    }
+  }
+  
+  .clean-reasoning-chevron {
     color: #9ca3af;
     transition: transform 0.2s ease;
     transform: rotate(0deg);
-    width: 12px;
-    height: 12px;
+    width: 14px;
+    height: 14px;
+    flex-shrink: 0;
   }
-  .simple-reasoning-details[open] .simple-reasoning-chevron {
+  
+  .clean-reasoning-details[open] .clean-reasoning-chevron {
     transform: rotate(90deg);
   }
-  .simple-reasoning-content {
-    padding: 12px 0 12px 20px;
+  
+  .clean-reasoning-content {
+    padding: 12px 0 12px 22px;
     border-left: 2px solid #e5e7eb;
     margin-left: 6px;
+    font-size: 14px;
+    line-height: 1.6;
+    max-height: 400px;
+    overflow-y: auto;
+  }
+  
+  @media (prefers-color-scheme: dark) {
+    .clean-reasoning-content {
+      border-left-color: #374151;
+    }
+  }
+  
+  /* Override ALL green colors with high specificity */
+  .clean-reasoning-content div[style*="border-left"],
+  .clean-reasoning-content div[style*="#10a37f"],
+  .clean-reasoning-content div[style*="background"] {
+    background: transparent !important;
+    border: 1px solid #e5e7eb !important;
+    border-radius: 6px !important;
+    margin: 8px 0 !important;
+    padding: 12px 16px !important;
+    border-left: 3px solid #6b7280 !important;
+    transition: all 0.2s ease;
+  }
+  
+  .clean-reasoning-content div[style*="border-left"]:hover,
+  .clean-reasoning-content div[style*="#10a37f"]:hover,
+  .clean-reasoning-content div[style*="background"]:hover {
+    background: rgba(0, 0, 0, 0.02) !important;
+    border-color: #9ca3af !important;
+    transform: none !important;
+    box-shadow: none !important;
+  }
+  
+  @media (prefers-color-scheme: dark) {
+    .clean-reasoning-content div[style*="border-left"],
+    .clean-reasoning-content div[style*="#10a37f"],
+    .clean-reasoning-content div[style*="background"] {
+      background: transparent !important;
+      border: 1px solid #374151 !important;
+      border-left: 3px solid #6b7280 !important;
+    }
+    .clean-reasoning-content div[style*="border-left"]:hover,
+    .clean-reasoning-content div[style*="#10a37f"]:hover,
+    .clean-reasoning-content div[style*="background"]:hover {
+      background: rgba(255, 255, 255, 0.02) !important;
+      border-color: #4b5563 !important;
+    }
+  }
+  
+  /* Override all green text colors */
+  .clean-reasoning-content span[style*="#10a37f"],
+  .clean-reasoning-content span[style*="color"],
+  .clean-reasoning-content div[style*="color: #10a37f"] span {
+    color: #6b7280 !important;
+    font-weight: 600 !important;
+  }
+  
+  @media (prefers-color-scheme: dark) {
+    .clean-reasoning-content span[style*="#10a37f"],
+    .clean-reasoning-content span[style*="color"],
+    .clean-reasoning-content div[style*="color: #10a37f"] span {
+      color: #9ca3af !important;
+    }
+  }
+  
+  /* Force override any remaining green styling */
+  .clean-reasoning-content * {
+    border-color: #e5e7eb !important;
+  }
+  
+  @media (prefers-color-scheme: dark) {
+    .clean-reasoning-content * {
+      border-color: #374151 !important;
+    }
+  }
+  
+  /* Custom scrollbar */
+  .clean-reasoning-content::-webkit-scrollbar {
+    width: 4px;
+  }
+  
+  .clean-reasoning-content::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  
+  .clean-reasoning-content::-webkit-scrollbar-thumb {
+    background: rgba(0, 0, 0, 0.2);
+    border-radius: 2px;
+  }
+  
+  .clean-reasoning-content::-webkit-scrollbar-thumb:hover {
+    background: rgba(0, 0, 0, 0.3);
+  }
+  
+  @media (prefers-color-scheme: dark) {
+    .clean-reasoning-content::-webkit-scrollbar-thumb {
+      background: rgba(255, 255, 255, 0.2);
+    }
+    .clean-reasoning-content::-webkit-scrollbar-thumb:hover {
+      background: rgba(255, 255, 255, 0.3);
+    }
+  }
+  
+  /* Hide default details marker */
+  details summary::-webkit-details-marker {
+    display: none;
+  }
+  details summary::marker {
+    content: "";
   }
 </style>
-<details class="simple-reasoning-details" style="
-  margin: 16px 0;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif;
-">
-  <summary class="simple-reasoning-summary">
-    <svg class="simple-reasoning-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+<details class="clean-reasoning-details">
+  <summary class="clean-reasoning-summary" aria-label="Toggle reasoning details">
+    <svg class="clean-reasoning-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
       <polyline points="9,18 15,12 9,6"/>
     </svg>
     <span>Thinking</span>
   </summary>
-  <div class="simple-reasoning-content" style="
-    font-size: 14px;
-    line-height: 1.7;
-    color: #374151;
-  ">${processedReasoning}</div>
-</details>
-
-<style>
-details[open] summary svg:first-of-type {
-  transform: rotate(90deg) !important;
-}
-details summary::-webkit-details-marker {
-  display: none;
-}
-details summary::marker {
-  content: "";
-}
-</style>`;
+  <div class="clean-reasoning-content">
+    ${processedReasoning}
+  </div>
+</details>`;
             
-            await sendChunk(reasoningHtml, 30);
+              await sendChunk(reasoningHtml, 30);
+              // Add a small separator after reasoning
+              await sendChunk('\n\n', 20);
+            }
           }
           
           // 3. Stream the main AI response (the actual answer)
-          const words = aiResponse.split(' ');
+          // Clean the AI response to remove any reasoning content that might have leaked in
+          let cleanAiResponse = aiResponse;
+          
+          // Remove HTML/CSS content if present
+          if (cleanAiResponse.includes('<style>') || cleanAiResponse.includes('<details>')) {
+            console.log('🧹 Cleaning AI response from HTML/CSS content');
+            const textMatch = cleanAiResponse.match(/(?:<\/details>|<\/style>)\s*([\s\S]+)$/);
+            if (textMatch) {
+              cleanAiResponse = textMatch[1].trim();
+              console.log('🧹 Cleaned HTML/CSS from response');
+            }
+          }
+          
+          // Remove reasoning patterns that might have leaked into the response
+          const reasoningPatterns = [
+            // Remove "Chain of Thought Analysis" sections
+            /\*\*Chain of Thought Analysis:\*\*[\s\S]*?(?=\*\*(?:Final Response|Answer):\*\*|\n\n(?:In Edify|Our policy|At Edify)|$)/gi,
+            // Remove numbered reasoning steps at the beginning
+            /^(?:\d+\.\s+\*\*[^*]+\*\*[^\n]*\n)+/gm,
+            // Remove analysis headers
+            /\*\*(?:Question Analysis|Knowledge Search|Information Synthesis|Educational Context):\*\*[^\n]*\n/gi,
+            // Remove reasoning that starts with analysis keywords
+            /^(?:Looking at|Analyzing|Need to find|Checking|Searching)[^\n]*?\.\s*/gmi,
+            // Remove SOP references that are analysis artifacts
+            /^SOP\/[^\n]*\n/gm,
+            // Remove final response markers
+            /\*\*(?:Final Response|Answer):\*\*\s*/gi
+          ];
+          
+          for (const pattern of reasoningPatterns) {
+            const before = cleanAiResponse;
+            cleanAiResponse = cleanAiResponse.replace(pattern, '');
+            if (before !== cleanAiResponse) {
+              console.log('🧹 Removed reasoning pattern from response');
+            }
+          }
+          
+          // If response starts with typical Edify responses, preserve them
+          const edifyStarters = ['In Edify schools', 'Our policy', 'At Edify', 'The SOP'];
+          let hasEdifyStart = false;
+          for (const starter of edifyStarters) {
+            if (cleanAiResponse.includes(starter)) {
+              const index = cleanAiResponse.indexOf(starter);
+              if (index > 0) {
+                cleanAiResponse = cleanAiResponse.substring(index);
+                console.log('🧹 Extracted Edify response from mixed content');
+              }
+              hasEdifyStart = true;
+              break;
+            }
+          }
+          
+          // Final cleanup: remove any remaining analysis artifacts
+          cleanAiResponse = cleanAiResponse
+            .replace(/^[\s\S]*?(?=(?:In Edify|Our policy|At Edify|The SOP|[A-Z][a-z]+ assessment))/i, '') // Extract content starting from policy statements
+            .replace(/^\s*[-*]\s*/gm, '') // Remove bullet points that might be reasoning artifacts
+            .trim();
+          
+          // Ensure we have meaningful content
+          if (!cleanAiResponse || cleanAiResponse.length < 10) {
+            console.log('🧹 Response too short after cleaning, using original');
+            cleanAiResponse = aiResponse;
+          }
+          
+          console.log('🧹 Final cleaned response length:', cleanAiResponse.length);
+          
+          const words = cleanAiResponse.split(' ');
           for (let i = 0; i < words.length; i++) {
             if (controller.desiredSize === null) break; // Controller is closed
             
@@ -462,16 +675,13 @@ details summary::marker {
             for (let i = 0; i < videoSources.length; i++) {
               const video = videoSources[i];
               
-              // Extract video title
-              let videoTitle = 'Educational Video';
-              if (video.title && video.title !== video.filename) {
-                videoTitle = video.title;
-              } else if (video.filename) {
-                // Clean up filename for display
+              // Extract video title using only metadata
+              let videoTitle = video.title || `Educational Video ${i + 1}`;
+              if (!video.title && video.filename) {
+                // Clean up filename for display without UUID removal
                 videoTitle = video.filename
                   .replace(/\.[^/.]+$/, '') // Remove extension
                   .replace(/[_-]/g, ' ') // Replace underscores/hyphens with spaces
-                  .replace(/([a-f0-9\-]{8,})/gi, '') // Remove UUID-like strings
                   .trim();
                 
                 if (!videoTitle || videoTitle.length < 3) {
@@ -602,39 +812,23 @@ details summary::marker {
             for (let i = 0; i < sources.length; i++) {
               const source = sources[i];
               
-              // Better title extraction with fallbacks
-              let title = 'Unknown Document';
-              
-              // Try to get title from various fields
-              if (source.title && source.title !== source.filename) {
-                title = source.title;
-              } else if (source.document_title) {
-                title = source.document_title;
-              } else if (source.name) {
-                title = source.name;
-              } else if (source.filename) {
-                // Clean up filename if it looks like a UUID
-                if (source.filename.match(/^[a-f0-9\-\s]+$/i)) {
-                  title = `Document ${i + 1}`;
-                } else {
-                  // Remove file extension and clean filename
-                  title = source.filename.replace(/\.[^/.]+$/, '').replace(/[_-]/g, ' ');
-                }
-              } else {
-                title = `Document ${i + 1}`;
+              // Use only metadata for title and download
+              let title = source.title || source.document_title || source.name || source.filename || `Document ${i + 1}`;
+              // Remove file extension and clean filename for display if no title
+              if (!source.title && !source.document_title && !source.name && source.filename) {
+                title = source.filename.replace(/\.[^/.]+$/, '').replace(/[_-]/g, ' ');
               }
-              
+
               const actualBackendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || process.env.BACKEND_URL || 'http://localhost:5000';
-              
-              // Generate download URL if not provided
+              // Always use filename from metadata for download
               let downloadUrl = source.download_url;
               if (!downloadUrl || !downloadUrl.startsWith('http')) {
                 downloadUrl = `${actualBackendUrl}/api/files/download/${encodeURIComponent(source.filename || '')}`;
               }
-              
+
               // Add source as markdown with proper formatting
               await sendChunk(`**${i + 1}. ${title}**\n`, 20);
-              
+
               if (source.excerpt) {
                 const excerpt = source.excerpt.substring(0, 150) + (source.excerpt.length > 150 ? '...' : '');
                 await sendChunk(`*${excerpt}*\n`, 10);
@@ -642,7 +836,7 @@ details summary::marker {
                 const deptInfo = [source.department, source.sub_department].filter(Boolean).join(' › ');
                 await sendChunk(`*Department: ${deptInfo}*\n`, 10);
               }
-              
+
               await sendChunk(`[📄 Download PDF](${downloadUrl})\n\n`, 30);
             }
           }

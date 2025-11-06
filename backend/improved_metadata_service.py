@@ -185,17 +185,15 @@ class ImprovedMetadataService:
         return None, {}, 0.0
     
     def _find_best_filename_match(self, vector_filename: str, edify_metadata: Dict) -> Tuple[Optional[str], float]:
-        """Find best filename match using similarity scoring"""
+        """Find best filename match using similarity scoring without UUID processing"""
         best_match_id = None
         best_score = 0.0
         
         # Extract base filename for comparison
         base_filename = vector_filename.replace('.pdf', '').replace('.PDF', '')
-        # Try to extract original name from UUID filename
-        uuid_match = self._extract_uuid_from_path(base_filename)
-        if uuid_match == base_filename:
-            # This is a UUID filename, can't match by filename similarity
-            return None, 0.0
+        # Remove path if present
+        if '/' in base_filename:
+            base_filename = base_filename.split('/')[-1]
         
         for doc_id, metadata in edify_metadata.items():
             edify_filename = metadata['filename']
@@ -212,87 +210,75 @@ class ImprovedMetadataService:
         return best_match_id, best_score
     
     def enhance_chunk_metadata(self, chunk_metadata: Dict) -> Dict:
-        """Enhanced metadata enhancement with multi-strategy matching"""
+        """Enhanced metadata enhancement using only metadata, no UUID processing"""
         enhanced = chunk_metadata.copy()
         
-        # Extract vector UUID from various sources
-        vector_uuid = None
-        if 'filename' in chunk_metadata:
-            vector_uuid = self._extract_uuid_from_path(chunk_metadata['filename'])
-        elif 'chunk_id' in chunk_metadata:
-            vector_uuid = self._extract_uuid_from_path(chunk_metadata['chunk_id'])
-        elif 'vector_id' in chunk_metadata:
-            vector_uuid = self._extract_uuid_from_path(chunk_metadata['vector_id'])
+        # Use filename-based matching without UUID extraction
+        filename = chunk_metadata.get('filename', '')
         
-        if not vector_uuid:
-            logger.warning(f"No UUID found in chunk metadata: {chunk_metadata}")
-            # Still provide fallback enhancement even without UUID
-            fallback_name = self._generate_fallback_display_name(chunk_metadata)
-            enhanced.update({
-                'display_name': fallback_name,
-                'original_filename': chunk_metadata.get('filename', 'Unknown'),
-                'document_title': fallback_name,
-                'metadata_source': 'fallback_no_uuid',
-                'match_confidence': 0.0,
-                'match_strategy': 'fallback_no_uuid'
-            })
-            return enhanced
+        if filename:
+            # Try to match with Edify metadata using filename similarity
+            edify_metadata = self._fetch_edify_metadata()
+            if edify_metadata:
+                best_match_id, best_score = self._find_best_filename_match(filename, edify_metadata)
+                
+                if best_match_id and best_score > 0.5:  # Minimum confidence threshold
+                    matched_metadata = edify_metadata[best_match_id]
+                    # Enhance with matched metadata
+                    enhanced.update({
+                        'display_name': matched_metadata['display_name'],
+                        'original_filename': matched_metadata['filename'],
+                        'document_title': matched_metadata['title'],
+                        'department': matched_metadata['department'],
+                        'school_types': matched_metadata['school_types'],
+                        'download_url': matched_metadata['download_url'],
+                        'metadata_source': 'edify_api',
+                        'match_confidence': best_score,
+                        'match_strategy': 'filename_similarity',
+                        'edify_doc_id': best_match_id
+                    })
+                    logger.info(f"Enhanced metadata for {filename} with confidence {best_score:.3f}")
+                    return enhanced
         
-        # Try multi-strategy matching
-        matched_doc_id, matched_metadata, confidence = self.match_document_by_strategies(
-            vector_uuid=vector_uuid,
-            chunk_text=chunk_metadata.get('text', ''),
-            vector_metadata=chunk_metadata
-        )
-        
-        if matched_doc_id and confidence > 0.5:  # Minimum confidence threshold
-            # Enhance with matched metadata
-            enhanced.update({
-                'display_name': matched_metadata['display_name'],
-                'original_filename': matched_metadata['filename'],
-                'document_title': matched_metadata['title'],
-                'department': matched_metadata['department'],
-                'school_types': matched_metadata['school_types'],
-                'download_url': matched_metadata['download_url'],
-                'metadata_source': 'edify_api',
-                'match_confidence': confidence,
-                'match_strategy': 'direct_uuid' if confidence == 1.0 else 'filename_similarity',
-                'edify_doc_id': matched_doc_id
-            })
-            logger.info(f"Enhanced metadata for {vector_uuid} with confidence {confidence:.3f}")
-        else:
-            # Fallback to intelligent display name
-            fallback_name = self._generate_fallback_display_name(chunk_metadata)
-            enhanced.update({
-                'display_name': fallback_name,
-                'original_filename': chunk_metadata.get('filename', 'Unknown'),
-                'document_title': fallback_name,
-                'metadata_source': 'fallback',
-                'match_confidence': 0.0,
-                'match_strategy': 'fallback'
-            })
-            logger.info(f"Using fallback display name for {vector_uuid}: {fallback_name}")
+        # Fallback to intelligent display name using only metadata
+        fallback_name = self._generate_fallback_display_name(chunk_metadata)
+        enhanced.update({
+            'display_name': fallback_name,
+            'original_filename': chunk_metadata.get('filename', 'Unknown'),
+            'document_title': fallback_name,
+            'metadata_source': 'fallback',
+            'match_confidence': 0.0,
+            'match_strategy': 'fallback'
+        })
+        logger.info(f"Using fallback display name for {filename}: {fallback_name}")
         
         return enhanced
     
     def _generate_fallback_display_name(self, chunk_metadata: Dict) -> str:
-        """Generate intelligent fallback display name"""
+        """Generate intelligent fallback display name using only metadata"""
         # Try to use filename if available
         if 'filename' in chunk_metadata:
             filename = chunk_metadata['filename']
-            # If it's a UUID-based filename, extract the namespace or use a friendly name
-            if self._extract_uuid_from_path(filename):
-                if 'k12' in filename:
+            
+            # Extract meaningful name from path structure
+            if '/' in filename:
+                path_parts = filename.split('/')
+                # Determine document type from path
+                if 'k12' in filename.lower():
                     return "K12 Document"
-                elif 'preschool' in filename:
+                elif 'preschool' in filename.lower():
                     return "Preschool Document"
-                elif 'edifyho' in filename or 'administrative' in filename:
+                elif 'edifyho' in filename.lower() or 'administrative' in filename.lower():
                     return "Administrative Document"
                 else:
                     return "Educational Document"
             else:
-                # Use the actual filename
-                return filename.replace('.pdf', '').replace('_', ' ').title()
+                # Use the actual filename, cleaned up
+                display_name = filename.replace('.pdf', '').replace('_', ' ').replace('-', ' ').title()
+                # If filename is too short or seems like random chars, use generic name
+                if len(display_name) < 3 or display_name.replace(' ', '').isalnum() and len(display_name) < 10:
+                    return "Educational Document"
+                return display_name
         
         # Fallback to generic name
         return "Educational Document"
