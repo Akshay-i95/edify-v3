@@ -267,10 +267,7 @@ def chat():
         messages = compress_old_context(optimized_messages, max_length=30)
         
         # Log the conversation for debugging
-        if namespaces:
-            logger.info(f"🏷️ Target namespaces: {namespaces}")
-        else:
-            logger.info(f"🏷️ Target namespaces: ALL (comprehensive search enabled)")
+        logger.info(f"🏷️ Target namespaces: {namespaces}")
         logger.info(f"👤 User role: {role}")
         logger.info(f"💬 Message optimization: {len(raw_messages)} → {len(messages)} messages in context")
         

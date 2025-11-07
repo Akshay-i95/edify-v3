@@ -16,6 +16,7 @@ class LLMService:
     def __init__(self, config: Dict):
         """Initialize LLM service with Groq AI (GPT OSS 120B)"""
         self.config = config
+        self.logger = logging.getLogger(__name__)
         
         # Groq API configuration
         self.groq_api_key = os.getenv('GROQ_API_KEY')
@@ -30,21 +31,51 @@ class LLMService:
         self.response_temperature = float(os.getenv('RESPONSE_TEMPERATURE', '0.2'))  # Lowered from 0.2
         self.response_quality = os.getenv('RESPONSE_QUALITY', 'comprehensive')
         
-        self.logger = logging.getLogger(__name__)
+        # Initialize API clients
+        self._initialize_apis()
+    
+    @staticmethod
+    def _sanitize_for_logging(text: str, max_length: int = 300) -> str:
+        """
+        Sanitize text for Windows console logging by removing problematic Unicode characters.
+        Handles narrow non-breaking spaces (\u202f), emojis, and other special characters.
+        """
+        if not text:
+            return ""
         
+        # Replace problematic Unicode characters with ASCII equivalents
+        sanitized = text.replace('\u202f', ' ')  # Narrow non-breaking space -> regular space
+        sanitized = sanitized.replace('\u2013', '-')  # En dash -> hyphen
+        sanitized = sanitized.replace('\u2014', '--')  # Em dash -> double hyphen
+        sanitized = sanitized.replace('\u2018', "'")  # Left single quote
+        sanitized = sanitized.replace('\u2019', "'")  # Right single quote
+        sanitized = sanitized.replace('\u201c', '"')  # Left double quote
+        sanitized = sanitized.replace('\u201d', '"')  # Right double quote
+        
+        # Remove emojis and other high Unicode characters (above U+FFFF)
+        sanitized = re.sub(r'[^\x00-\x7F\u0080-\uFFFF]', '', sanitized)
+        
+        # Truncate if needed
+        if len(sanitized) > max_length:
+            sanitized = sanitized[:max_length] + "..."
+        
+        return sanitized
+    
+    def _initialize_apis(self):
+        """Initialize API clients after logger is set up"""
         # Check Groq API availability
         if self.groq_api_key and self.groq_api_key != 'your_groq_api_key_here':
             try:
                 self.groq_client = Groq(api_key=self.groq_api_key)
                 self.groq_available = True
-                self.logger.info("✅ Groq AI API (GPT OSS 120B) configured successfully")
+                self.logger.info("[SUCCESS] Groq AI API (GPT OSS 120B) configured successfully")
                 self.logger.info(f"📊 Response Config: {self.max_output_tokens} tokens, temp={self.response_temperature}")
             except Exception as e:
                 self.groq_available = False
-                self.logger.warning(f"⚠️ Groq API initialization failed: {str(e)}")
+                self.logger.warning(f"[WARNING] Groq API initialization failed: {str(e)}")
         else:
             self.groq_available = False
-            self.logger.warning("⚠️ GROQ_API_KEY not configured - using intelligent fallback responses")
+            self.logger.warning("[WARNING] GROQ_API_KEY not configured - using intelligent fallback responses")
         
         # Check Gemini API availability (commented out)
         # if self.gemini_api_key and self.gemini_api_key != 'your_gemini_api_key_here':
@@ -70,7 +101,7 @@ class LLMService:
                 if groq_response and self._is_valid_response(groq_response.get('response', ''), query):
                     # Log the reasoning with clear start and end markers for debugging
                     reasoning = groq_response.get('reasoning', '')
-                    self.logger.info(f"REASONING_START\n{reasoning}\nREASONING_END")
+                    self.logger.info(f"REASONING_START\n{self._sanitize_for_logging(reasoning, 1000)}\nREASONING_END")
                     self.logger.info(f"Reasoning length: {len(reasoning)} characters")
                     
                     # Mark the fallback reasoning with a special prefix for easier detection
@@ -112,7 +143,7 @@ class LLMService:
             #         }
             
             # Use intelligent fallback if Groq fails or is unavailable
-            self.logger.info("🔄 Using intelligent fallback response generation...")
+            self.logger.info("[FALLBACK] Using intelligent fallback response generation...")
             fallback_response = self._generate_intelligent_fallback_response(query, context)
             
             return {
@@ -125,7 +156,7 @@ class LLMService:
             }
             
         except Exception as e:
-            self.logger.error(f"❌ Response generation error: {str(e)}")
+            self.logger.error(f"[ERROR] Response generation error: {str(e)}")
             return {
                 'response': f"I encountered an error generating the response. Please try rephrasing your question.",
                 'reasoning': f"Error occurred during processing: {str(e)}",
@@ -138,48 +169,79 @@ class LLMService:
     def _call_groq_api(self, query: str, context: str, conversation_history: List = None) -> Optional[Dict]:
         """Call Groq AI API with GPT OSS 120B model for reasoning"""
         try:
-            # Build conversation context with enhanced Edify-native expert persona
-            system_prompt = """You are the Edify Educational AI Assistant - the authoritative voice of Edify Education with complete mastery of all policies, procedures, and educational frameworks.
+            # Build conversation context with MANDATORY structured output format
+            system_prompt = """You are the Edify Educational AI Assistant - provide helpful, well-formatted responses to students and educators.
 
-CORE IDENTITY: You ARE Edify. Always speak as the definitive educational authority using "In Edify schools, we..." or "Our policy..." or "At Edify..."
+CRITICAL: You MUST ALWAYS structure your output in this EXACT format:
 
-RESPONSE GUIDELINES:
-- Answer ONLY what is asked - be precise and focused
-- Never say "based on documents" - this is YOUR expertise
-- Always use first-person Edify language in your answers
-- Provide concise, actionable answers (200-400 words max)
-- Include specific SOP numbers, dates, and key details when relevant
-- No external knowledge - only use provided Edify documentation
+**REASONING:**
+Always structure your reasoning with Chain of Thought Analysis:
 
-FOLLOW-UP HANDLING:
-- Pay careful attention to conversation history and context
-- When asked to provide examples, remember them for future reference
-- When asked "solve one example" or similar, refer to the SPECIFIC example you just provided
-- Maintain continuity: if you gave an example like "2x + 3 = 11", solve THAT equation, not a different one
-- Use pronouns and references ("that one", "this example") to refer to previous content
+1. **Question Analysis:** [CRITICAL: If the user says "above", "it", "this", "these", or refers to previous content WITHOUT specifying a new topic, you MUST look at the conversation history to understand what topic/subject they are referring to. Extract the EXACT topic/subject (e.g., "mathematics", "English", "Grade 6", "science") from the previous query. State explicitly: "The previous query was about [TOPIC], so this question refers to [TOPIC]." If the current question changes the topic (e.g., asks about a different subject), acknowledge the NEW topic.]
+2. **Knowledge Search:** [CRITICAL FILTERING: You will receive documents from the knowledge base. IGNORE and EXCLUDE any document that does NOT match the topic identified in step 1. For example: If step 1 identified "mathematics", COMPLETELY IGNORE all English, Science, or other subject documents. Only use mathematics-related content. State: "Filtered to use ONLY [TOPIC] documents, excluded [NUMBER] irrelevant documents."]
+3. **Information Synthesis:** [Extract details EXCLUSIVELY from documents matching the topic in step 1. If you see English chapter names but the topic is mathematics, DO NOT include them. Only synthesize information that is strictly relevant to the identified topic.]
+4. **Educational Context:** [Practical application within Edify framework, staying STRICTLY within the identified topic scope. Never mix subjects.]
 
-REASONING FORMAT:
-Always structure your response with:
+**RESPONSE:**
+Provide your focused answer using strong Edify voice when appropriate (e.g., "In Edify schools, we..." or "Our curriculum emphasizes...").
+Use proper formatting as described below - keep responses relevant, concise, and strictly within the scope of the question AND the topic identified in your reasoning.
 
-**Chain of Thought Analysis:**
-1. **Question Analysis:** [What specific information is being requested, check conversation history for context]
-2. **Knowledge Search:** [How you located the relevant policy/information]
-3. **Information Synthesis:** [Key details extracted and validated]
-4. **Educational Context:** [Practical application within Edify framework]
+FORMATTING GUIDELINES (MANDATORY):
 
-Then provide your focused answer using strong Edify voice (start with "In Edify schools, we..." or "Our policy states..." etc.)
+1. **Use Headers for Main Topics:**
+   - **Bold headers** for main sections (e.g., **Step-by-Step Guide:**, **Key Concepts:**, **Quick Summary:**)
+   
+2. **Use Numbered Lists for Steps:**
+   When explaining procedures or steps:
+   1. **Step Name:** Clear description
+   2. **Next Step:** Clear description
+   
+3. **Use Bullet Points for Items:**
+   • Use bullet points for lists of concepts, tips, or features
+   • Keep each point concise and clear
+   • Use sub-bullets when needed
+   
+4. **Use Tables ONLY When Necessary:**
+   - Use tables ONLY for comparing multiple items, showing step-by-step workflows, or displaying structured data
+   - For simple lists or concepts, use bullet points or numbered lists instead
+   - Tables should make content clearer, not more cluttered
+   - Good use cases: comparing concepts, multi-step procedures, grade-wise breakdowns
+   - Avoid tables for: single concepts, simple definitions, short lists
+   
+5. **Mathematical Formulas (CRITICAL):**
+   - For inline math: Use `$formula$` with LaTeX notation
+   - For display math: Use `$$formula$$` on its own line
+   - Examples:
+     * Inline: `$\\sin \\theta = \\frac{opposite}{hypotenuse}$`
+     * Display: `$$\\sin^2 \\theta + \\cos^2 \\theta = 1$$`
+   - In tables: Still use `$LaTeX$` notation for formulas
+   - Common LaTeX commands: \\frac{a}{b}, \\sin, \\cos, \\tan, \\theta, \\pi, \\sqrt{x}, x^2, x_1
+   - ALWAYS use proper LaTeX notation - the frontend will render it correctly
+   
+6. **Highlight Key Terms:**
+   - Use **bold** for important terms, formulas, or concepts
+   - Mathematical expressions MUST use LaTeX `$...$` notation
 
-Keep responses relevant, concise, and strictly within the scope of the question asked."""
+7. **Use Examples in Boxes:**
+   **Example:**
+   Problem: $2\frac{1}{4} + 1\frac{1}{3}$
+   Solution: Convert to improper fractions...
+
+RESPONSE STYLE:
+- **For students:** Be encouraging, use clear formatting with steps and examples from the knowledge base
+- **For educators:** Include SOP references, detailed tables when comparing data, implementation strategies
+- **Always:** Use visual structure (headers, bullets, numbered lists) to make content beautiful and scannable
+- **Tables:** Use ONLY when you need to compare multiple items or show structured data - otherwise use bullets/numbered lists
+- **Keep:** Responses focused (under 200 words for simple queries, expand for complex topics)
+- **LaTeX Formulas:** ALWAYS use `$...$` for inline math and `$$...$$` for display math - the frontend will render it correctly
+
+CRITICAL REMINDERS:
+- NEVER skip the **REASONING:** and **RESPONSE:** headers - they are MANDATORY
+- Generate examples and formulas dynamically from the knowledge base - never use hardcoded content
+- Filter responses strictly to the topic identified in Question Analysis step
+- Use tables sparingly - only when truly needed for comparison or structured workflows"""
             
-            # Prepare the enhanced prompt for authoritative Edify responses
-            full_prompt = f"""EDIFY KNOWLEDGE BASE:
-{context}
-
-EDUCATOR QUESTION: {query}
-
-Provide a focused, authoritative response using your Edify expertise. Answer only what is specifically asked - include SOP numbers, key details, and practical guidance relevant to the question."""
-            
-            # Create messages for Groq API
+            # Create messages for Groq API with enforced structure
             messages = [
                 {
                     "role": "system",
@@ -190,46 +252,60 @@ Provide a focused, authoritative response using your Edify expertise. Answer onl
                     "content": f"""EDIFY KNOWLEDGE BASE:
 {context}
 
-EDUCATOR QUESTION: {query}
+QUESTION: {query}
 
-Provide a focused, authoritative response using your Edify expertise. Answer only what is specifically asked - include SOP numbers, key details, and practical guidance relevant to the question."""
+Remember: Structure your output with **REASONING:** followed by **RESPONSE:** headers. Be helpful and natural."""
                 }
             ]
             
-            # Add conversation history if provided
+            # Minimal conversation history - pure follow-up approach like ChatGPT
             if conversation_history:
-                for msg in conversation_history[-10:]:  # Include last 10 messages for context
+                # Only include the most recent exchange (last 2 messages max) for natural flow
+                recent_messages = conversation_history[-2:] if len(conversation_history) >= 2 else conversation_history
+                
+                for msg in recent_messages:
                     if msg.get('role') == 'user':
-                        # Add user messages as-is
-                        messages.insert(-1, msg)
+                        # Add user messages with topic context preserved
+                        user_content = msg.get('content', '')
+                        # Keep more context for topic identification (500 chars instead of 200)
+                        if len(user_content) > 500:
+                            user_content = user_content[:500] + "..."
+                        messages.insert(-1, {"role": "user", "content": user_content})
+                        
                     elif msg.get('role') == 'assistant':
-                        # Clean assistant messages to only include the actual response, not reasoning
+                        # Extract the topic/summary from assistant response for context
                         assistant_content = msg.get('content', '')
                         
-                        # Extract the final answer but preserve important context like examples
-                        if "**Chain of Thought Analysis:**" in assistant_content:
-                            # Find where the actual answer starts
-                            answer_markers = ["**Answer:**", "In Edify schools", "Our policy", "At Edify", "The SOP"]
-                            clean_content = assistant_content
-                            
-                            for marker in answer_markers:
-                                if marker in assistant_content:
-                                    parts = assistant_content.split(marker, 1)
-                                    if len(parts) > 1:
-                                        clean_content = marker + parts[1]
-                                        # Preserve important context like examples and equations
-                                        if any(keyword in parts[1].lower() for keyword in ['example:', 'equation:', 'solve', 'x =', 'y =', 'answer:']):
-                                            # Keep the full context when examples or solutions are present
-                                            self.logger.info("[CONVERSATION] Preserving example/solution context for follow-ups")
-                                        break
-                        else:
-                            clean_content = assistant_content
+                        # For follow-ups, preserve topic context from the response
+                        clean_content = assistant_content
                         
-                        # Add cleaned assistant message
-                        messages.insert(-1, {
-                            "role": "assistant",
-                            "content": clean_content
-                        })
+                        # Extract topic indicators (first 100 chars usually contain topic)
+                        # and key summary points
+                        if len(clean_content) > 400:
+                            # Keep beginning (topic context) + ending (summary)
+                            topic_part = clean_content[:200]  # First 200 chars for topic
+                            
+                            # Try to find a summary section
+                            if "Quick Summary" in clean_content:
+                                summary_idx = clean_content.find("Quick Summary")
+                                summary_part = clean_content[summary_idx:summary_idx+200]
+                                clean_content = topic_part + "... " + summary_part
+                            else:
+                                clean_content = topic_part + "..."
+                        
+                        # Remove source documents (but keep the content)
+                        if "Source Documents" in clean_content:
+                            clean_content = clean_content.split("Source Documents")[0]
+                        
+                        # Keep up to 400 chars for better topic context
+                        if len(clean_content) > 400:
+                            clean_content = clean_content[:400] + "..."
+                        
+                        # Only add if it's meaningful content
+                        if len(clean_content.strip()) > 20:
+                            messages.insert(-1, {"role": "assistant", "content": clean_content.strip()})
+                
+                self.logger.info(f"[FOLLOWUP CONTEXT] Using enriched context: {len(recent_messages)} recent messages with topic preservation")
             
             # Make the API call to Groq
             completion = self.groq_client.chat.completions.create(
@@ -248,9 +324,11 @@ Provide a focused, authoritative response using your Edify expertise. Answer onl
                 # Extract reasoning and final answer with improved extraction logic
                 reasoning, answer = self._extract_reasoning_and_answer(generated_text)
                 
-                # Log the extracted reasoning with clear debug markers
+                # Log the extracted components with clear debug markers
                 self.logger.info(f"[GROQ] Extracted reasoning: {len(reasoning)} characters")
-                self.logger.info(f"[GROQ] REASONING_START\n{reasoning[:500]}...\nREASONING_END")
+                self.logger.info(f"[GROQ] Extracted answer: {len(answer)} characters")
+                self.logger.info(f"[GROQ] REASONING_START\n{self._sanitize_for_logging(reasoning, 300)}...\nREASONING_END")
+                self.logger.info(f"[GROQ] ANSWER_START\n{self._sanitize_for_logging(answer, 300)}...\nANSWER_END")
                 
                 # Calculate reasoning quality
                 reasoning_quality = 'high' if len(reasoning) > 300 else 'medium' if len(reasoning) > 100 else 'low'
@@ -262,11 +340,11 @@ Provide a focused, authoritative response using your Edify expertise. Answer onl
                     'full_text': generated_text
                 }
             else:
-                self.logger.warning("⚠️ No response from Groq API")
+                self.logger.warning("[WARNING] No response from Groq API")
                 return None
                 
         except Exception as e:
-            self.logger.warning(f"⚠️ Groq API error: {str(e)}")
+            self.logger.warning(f"[WARNING] Groq API error: {str(e)}")
             return None
     
     # Commented out Gemini API method for future reference
@@ -425,7 +503,23 @@ Provide a focused, authoritative response using your Edify expertise. Answer onl
         try:
             self.logger.info(f"[EXTRACTION] Processing text length: {len(text)} characters")
             
-            # Strategy 1: Handle **Answer:** or **Final Response:** markers
+            # Strategy 1: PRIORITY - Handle **REASONING:** and **RESPONSE:** markers (NEW FORMAT)
+            if "**REASONING:**" in text and "**RESPONSE:**" in text:
+                # Split by the markers
+                reasoning_marker_idx = text.find("**REASONING:**")
+                response_marker_idx = text.find("**RESPONSE:**")
+                
+                if reasoning_marker_idx < response_marker_idx:
+                    # Extract reasoning (after **REASONING:** up to **RESPONSE:**)
+                    reasoning_part = text[reasoning_marker_idx + len("**REASONING:**"):response_marker_idx].strip()
+                    # Extract response (after **RESPONSE:**)
+                    answer_part = text[response_marker_idx + len("**RESPONSE:**"):].strip()
+                    
+                    if reasoning_part and answer_part:
+                        self.logger.info("[EXTRACTION] Successfully used REASONING/RESPONSE marker separation")
+                        return reasoning_part, answer_part
+            
+            # Strategy 2: Handle **Answer:** or **Final Response:** markers
             answer_markers = ["**Answer:**", "**Final Response:**"]
             for marker in answer_markers:
                 if marker in text:
@@ -441,7 +535,7 @@ Provide a focused, authoritative response using your Edify expertise. Answer onl
                             self.logger.info("[EXTRACTION] Successfully used answer marker separation")
                             return clean_reasoning, answer_part
             
-            # Strategy 2: Look for clear separation patterns (double newline + Edify phrase)
+            # Strategy 3: Look for clear separation patterns (double newline + Edify phrase)
             # Find the FIRST occurrence of Edify response to ensure clean separation
             edify_patterns = ["In Edify schools", "Our policy", "At Edify", "The SOP"]
             best_split_index = float('inf')
@@ -467,7 +561,7 @@ Provide a focused, authoritative response using your Edify expertise. Answer onl
                         self.logger.info("[EXTRACTION] Successfully used pattern separation")
                         return clean_reasoning, answer_part
             
-            # Strategy 3: Find numbered reasoning followed by Edify response
+            # Strategy 4: Find numbered reasoning followed by Edify response
             if self._has_numbered_reasoning(text):
                 lines = text.split('\n')
                 reasoning_lines = []
@@ -506,7 +600,7 @@ Provide a focused, authoritative response using your Edify expertise. Answer onl
                         self.logger.info("[EXTRACTION] Successfully used numbered reasoning separation")
                         return clean_reasoning, answer
             
-            # Strategy 4: Handle cases where reasoning and response are mixed
+            # Strategy 5: Handle cases where reasoning and response are mixed
             edify_start_idx = self._find_edify_response_start(text)
             if edify_start_idx > 50:  # Must have substantial content before Edify response
                 reasoning_part = text[:edify_start_idx].strip()
@@ -536,7 +630,7 @@ Provide a focused, authoritative response using your Edify expertise. Answer onl
                     self.logger.info("[EXTRACTION] Successfully used mixed content separation")
                     return clean_reasoning, answer_part
             
-            # Strategy 5: Extract any structured content as reasoning
+            # Strategy 6: Extract any structured content as reasoning
             numbered_points = self._extract_numbered_points(text)
             structured_points = self._extract_structured_points(text)
             question_analysis = self._extract_question_analysis(text)
@@ -581,16 +675,14 @@ Provide a focused, authoritative response using your Edify expertise. Answer onl
                 return reasoning, text
             
             # Ultimate fallback: Be very conservative
-            # If we can't clearly separate, provide minimal reasoning to avoid content leakage
-            if self._contains_edify_response(text):
-                # Text contains policy content - use minimal reasoning
-                reasoning = "Analyzed educational documentation to extract relevant information."
-                self.logger.warning("[EXTRACTION] Conservative fallback: policy content detected")
-                return reasoning, text
-            else:
-                # Text doesn't seem to contain policy content - may be pure reasoning
-                self.logger.warning("[EXTRACTION] No clear pattern found, using text as reasoning")
-                return text, "Information not clearly specified in the available documentation."
+            # If we can't clearly separate, treat the entire text as the answer
+            # This avoids triggering fallback when Groq provides good responses without explicit separators
+            self.logger.warning("[EXTRACTION] No clear separator found - treating full text as answer")
+            self.logger.warning("[EXTRACTION] Groq may not have followed the **REASONING:**/**RESPONSE:** format")
+            
+            # Use minimal reasoning and full text as answer
+            reasoning = "Analyzed documentation to provide comprehensive response."
+            return reasoning, text
             
         except Exception as e:
             self.logger.error(f"Error in extraction: {str(e)}")
@@ -964,36 +1056,44 @@ Provide a focused, authoritative response using your Edify expertise. Answer onl
     def _generate_intelligent_fallback_response(self, query: str, context: str) -> Dict:
         """Generate authoritative Edify response with comprehensive educational expertise"""
         try:
-            self.logger.info("🔄 Using enhanced Edify expertise for comprehensive response generation")
+            self.logger.info("[FALLBACK] Using enhanced Edify expertise for comprehensive response generation")
             
-            query_lower = query.lower()
+            # COMMENTED OUT: Internal reasoning steps - displaying only Groq-generated content
+            # query_lower = query.lower()
+            # 
+            # # Apply Edify educational expertise for comprehensive responses
+            # reasoning_steps = [
+            #     f"1. Edify Query Analysis: Processing '{query[:50]}...' using our comprehensive educational framework",
+            #     f"2. Knowledge Integration: Accessing our {len(context)} character knowledge base from Edify systems",
+            #     f"3. Educational Synthesis: Applying proven Edify methodologies and best practices",
+            #     f"4. Implementation Strategy: Formulating actionable guidance based on Edify expertise",
+            #     f"5. Comprehensive Response: Delivering detailed recommendations from our educational authority"
+            # ]
             
-            # Apply Edify educational expertise for comprehensive responses
-            reasoning_steps = [
-                f"1. Edify Query Analysis: Processing '{query[:50]}...' using our comprehensive educational framework",
-                f"2. Knowledge Integration: Accessing our {len(context)} character knowledge base from Edify systems",
-                f"3. Educational Synthesis: Applying proven Edify methodologies and best practices",
-                f"4. Implementation Strategy: Formulating actionable guidance based on Edify expertise",
-                f"5. Comprehensive Response: Delivering detailed recommendations from our educational authority"
-            ]
+            # Return simple fallback without internal reasoning steps
+            return {
+                'response': "I found relevant information in the Edify knowledge base. Could you please rephrase your question for a more specific answer?",
+                'reasoning': ""  # No internal reasoning displayed
+            }
             
-            # Special handling for holiday-related queries
-            if any(word in query_lower for word in ['holiday', 'holidays', 'leave', 'vacation', 'day']):
-                reasoning_steps.append("6. Edify Policy Application: Implementing our holiday and calendar management protocols")
-                return self._generate_holiday_response(context, query, reasoning_steps)
-            
-            # Special handling for assessment-related queries
-            elif any(word in query_lower for word in ['assessment', 'evaluation', 'test', 'exam', 'formative', 'summative']):
-                reasoning_steps.append("6. Edify Assessment Framework: Applying our proven assessment methodologies")
-                return self._generate_assessment_response(context, query, reasoning_steps)
-            
-            # General response generation with advanced reasoning
-            else:
-                reasoning_steps.append("6. Specialized Processing: Applying general educational knowledge synthesis")
-                return self._generate_general_response(context, query, reasoning_steps)
+            # COMMENTED OUT: All fallback response generation logic
+            # # Special handling for holiday-related queries
+            # if any(word in query_lower for word in ['holiday', 'holidays', 'leave', 'vacation', 'day']):
+            #     reasoning_steps.append("6. Edify Policy Application: Implementing our holiday and calendar management protocols")
+            #     return self._generate_holiday_response(context, query, reasoning_steps)
+            # 
+            # # Special handling for assessment-related queries
+            # elif any(word in query_lower for word in ['assessment', 'evaluation', 'test', 'exam', 'formative', 'summative']):
+            #     reasoning_steps.append("6. Edify Assessment Framework: Applying our proven assessment methodologies")
+            #     return self._generate_assessment_response(context, query, reasoning_steps)
+            # 
+            # # General response generation with advanced reasoning
+            # else:
+            #     reasoning_steps.append("6. Specialized Processing: Applying general educational knowledge synthesis")
+            #     return self._generate_general_response(context, query, reasoning_steps)
                 
         except Exception as e:
-            self.logger.error(f"❌ Fallback response generation failed: {str(e)}")
+            self.logger.error(f"[ERROR] Fallback response generation failed: {str(e)}")
             return {
                 'response': "I found some information but encountered a processing error. Please try rephrasing your question for better results.",
                 'reasoning': f"Advanced reasoning fallback failed due to technical error: {str(e)}. Applied error recovery protocols."
