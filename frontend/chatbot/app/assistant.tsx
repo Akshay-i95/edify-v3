@@ -147,19 +147,19 @@ export const Assistant = () => {
         <AppSidebar />
         <SidebarInset className="flex h-screen flex-col overflow-hidden">
           {/* Clean header with Breadcrumb navigation matching ref-ui */}
-          <header className="flex h-16 shrink-0 items-center gap-2 border-b px-4">
+          <header className="flex h-16 shrink-0 items-center gap-2 border-b px-4 md:px-4 sm:px-3">
             <SidebarTrigger className="-ml-1" />
             <Separator orientation="vertical" className="mr-2 h-4" />
             <Breadcrumb>
               <BreadcrumbList>
                 <BreadcrumbItem>
-                  <BreadcrumbPage>Edify Assistant</BreadcrumbPage>
+                  <BreadcrumbPage className="text-sm md:text-base">Edify Assistant</BreadcrumbPage>
                 </BreadcrumbItem>
               </BreadcrumbList>
             </Breadcrumb>
           </header>
           {/* Main content with proper height and overflow handling */}
-          <div className="flex flex-1 flex-col overflow-hidden p-4">
+          <div className="thread-container flex flex-1 flex-col overflow-hidden p-4 md:p-4 sm:p-3">
             <Thread />
           </div>
         </SidebarInset>

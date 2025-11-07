@@ -122,7 +122,7 @@ def initialize_system():
             'collection_name': os.getenv('COLLECTION_NAME', 'pdf_chunks'),
             'embedding_model': os.getenv('EMBEDDING_MODEL', 'all-MiniLM-L6-v2'),
             'max_context_chunks': int(os.getenv('MAX_CONTEXT_CHUNKS', '8')),
-            'min_similarity_threshold': float(os.getenv('MIN_SIMILARITY_THRESHOLD', '0.35')),
+            'min_similarity_threshold': float(os.getenv('MIN_SIMILARITY_THRESHOLD', '0.52')),
             'enable_citations': os.getenv('ENABLE_CITATIONS', 'true').lower() == 'true',
             'enable_context_expansion': os.getenv('ENABLE_CONTEXT_EXPANSION', 'true').lower() == 'true',
             'max_context_length': int(os.getenv('MAX_CONTEXT_LENGTH', '6000')),

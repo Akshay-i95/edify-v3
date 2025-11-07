@@ -120,3 +120,151 @@
     @apply bg-background text-foreground;
   }
 }
+
+/* Mobile-responsive styles following assistant-ui patterns */
+@layer base {
+  /* Ensure proper viewport handling on mobile */
+  html {
+    -webkit-text-size-adjust: 100%;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  /* Mobile-optimized scrolling */
+  body {
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior-y: none;
+  }
+
+  /* Mobile sidebar behavior */
+  @media (max-width: 768px) {
+    .sidebar {
+      position: fixed;
+      z-index: 50;
+      height: 100vh;
+      width: 100%;
+      max-width: 280px;
+    }
+
+    /* Mobile header adjustments */
+    header {
+      height: 56px !important;
+    }
+
+    /* Mobile thread container */
+    .thread-container {
+      padding: 12px;
+    }
+
+    /* Mobile message bubbles */
+    .aui-message {
+      max-width: 100%;
+    }
+
+    /* Mobile input area */
+    .aui-composer-root {
+      padding: 8px;
+    }
+
+    /* Mobile reasoning dropdown */
+    .simple-reasoning-details {
+      margin: 8px 0 16px 0 !important;
+    }
+
+    .simple-reasoning-content {
+      padding: 12px 8px 8px 16px !important;
+      font-size: 13px !important;
+    }
+
+    .reasoning-step-box {
+      margin-left: 12px !important;
+      padding: 6px 10px !important;
+      font-size: 13px !important;
+    }
+
+    /* Mobile markdown text */
+    .aui-md h1 {
+      font-size: 1.75rem !important;
+    }
+
+    .aui-md h2 {
+      font-size: 1.5rem !important;
+    }
+
+    .aui-md h3 {
+      font-size: 1.25rem !important;
+    }
+
+    .aui-md p {
+      font-size: 0.938rem !important;
+    }
+
+    /* Mobile code blocks */
+    .aui-md pre {
+      font-size: 13px !important;
+      overflow-x: auto;
+    }
+
+    /* Mobile tables */
+    .aui-md table {
+      display: block;
+      overflow-x: auto;
+      -webkit-overflow-scrolling: touch;
+    }
+  }
+
+  /* Small mobile devices */
+  @media (max-width: 480px) {
+    header {
+      height: 52px !important;
+      padding: 0 12px !important;
+    }
+
+    .thread-container {
+      padding: 8px;
+    }
+
+    .aui-composer-root {
+      padding: 6px;
+    }
+
+    .simple-reasoning-summary {
+      padding: 8px 10px !important;
+      font-size: 12px !important;
+    }
+
+    .reasoning-step-box {
+      margin-left: 8px !important;
+      padding: 6px 8px !important;
+      font-size: 12px !important;
+    }
+
+    .aui-md h1 {
+      font-size: 1.5rem !important;
+    }
+
+    .aui-md h2 {
+      font-size: 1.25rem !important;
+    }
+
+    .aui-md h3 {
+      font-size: 1.125rem !important;
+    }
+
+    .aui-md p {
+      font-size: 0.875rem !important;
+    }
+  }
+
+  /* Touch-friendly buttons */
+  @media (max-width: 768px) {
+    button, .aui-button {
+      min-height: 44px;
+      min-width: 44px;
+    }
+
+    /* Mobile toolbar spacing */
+    .aui-toolbar {
+      gap: 8px;
+    }
+  }
+}

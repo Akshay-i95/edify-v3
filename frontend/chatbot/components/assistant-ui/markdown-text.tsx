@@ -1,6 +1,7 @@
 "use client";
 
 import "@assistant-ui/react-markdown/styles/dot.css";
+import "katex/dist/katex.min.css";
 
 import {
   CodeHeaderProps,
@@ -9,7 +10,9 @@ import {
   useIsMarkdownCodeBlock,
 } from "@assistant-ui/react-markdown";
 import remarkGfm from "remark-gfm";
+import remarkMath from "remark-math";
 import rehypeRaw from "rehype-raw";
+import rehypeKatex from "rehype-katex";
 import { FC, memo, useState } from "react";
 import { CheckIcon, CopyIcon } from "lucide-react";
 
@@ -19,8 +22,8 @@ import { cn } from "@/lib/utils";
 const MarkdownTextImpl = () => {
   return (
     <MarkdownTextPrimitive
-      remarkPlugins={[remarkGfm]}
-      rehypePlugins={[rehypeRaw]}
+      remarkPlugins={[remarkGfm, remarkMath]}
+      rehypePlugins={[rehypeRaw, rehypeKatex]}
       className="aui-md"
       components={defaultComponents}
     />
@@ -135,7 +138,7 @@ const defaultComponents = memoizeMarkdownComponents({
   h1: ({ className, children, ...props }) => {
     const cleanChildren = typeof children === 'string' ? removeEmojis(children) : children;
     return (
-      <h1 className={cn("mb-8 scroll-m-20 text-4xl font-extrabold tracking-tight last:mb-0", className)} {...props}>
+      <h1 className={cn("mb-6 mt-8 scroll-m-20 text-3xl font-bold tracking-tight leading-tight first:mt-0 last:mb-0", className)} {...props}>
         {cleanChildren}
       </h1>
     );
@@ -143,7 +146,7 @@ const defaultComponents = memoizeMarkdownComponents({
   h2: ({ className, children, ...props }) => {
     const cleanChildren = typeof children === 'string' ? removeEmojis(children) : children;
     return (
-      <h2 className={cn("mb-4 mt-8 scroll-m-20 text-3xl font-semibold tracking-tight first:mt-0 last:mb-0", className)} {...props}>
+      <h2 className={cn("mb-4 mt-6 scroll-m-20 text-2xl font-semibold tracking-tight leading-snug first:mt-0 last:mb-0", className)} {...props}>
         {cleanChildren}
       </h2>
     );
@@ -151,7 +154,7 @@ const defaultComponents = memoizeMarkdownComponents({
   h3: ({ className, children, ...props }) => {
     const cleanChildren = typeof children === 'string' ? removeEmojis(children) : children;
     return (
-      <h3 className={cn("mb-4 mt-6 scroll-m-20 text-2xl font-semibold tracking-tight first:mt-0 last:mb-0", className)} {...props}>
+      <h3 className={cn("mb-3 mt-5 scroll-m-20 text-xl font-semibold tracking-tight leading-snug first:mt-0 last:mb-0", className)} {...props}>
         {cleanChildren}
       </h3>
     );
@@ -159,7 +162,7 @@ const defaultComponents = memoizeMarkdownComponents({
   h4: ({ className, children, ...props }) => {
     const cleanChildren = typeof children === 'string' ? removeEmojis(children) : children;
     return (
-      <h4 className={cn("mb-4 mt-6 scroll-m-20 text-xl font-semibold tracking-tight first:mt-0 last:mb-0", className)} {...props}>
+      <h4 className={cn("mb-3 mt-4 scroll-m-20 text-lg font-semibold tracking-tight leading-snug first:mt-0 last:mb-0", className)} {...props}>
         {cleanChildren}
       </h4>
     );
@@ -167,7 +170,7 @@ const defaultComponents = memoizeMarkdownComponents({
   h5: ({ className, children, ...props }) => {
     const cleanChildren = typeof children === 'string' ? removeEmojis(children) : children;
     return (
-      <h5 className={cn("my-4 text-lg font-semibold first:mt-0 last:mb-0", className)} {...props}>
+      <h5 className={cn("mb-2 mt-3 text-base font-semibold leading-normal first:mt-0 last:mb-0", className)} {...props}>
         {cleanChildren}
       </h5>
     );
@@ -175,16 +178,30 @@ const defaultComponents = memoizeMarkdownComponents({
   h6: ({ className, children, ...props }) => {
     const cleanChildren = typeof children === 'string' ? removeEmojis(children) : children;
     return (
-      <h6 className={cn("my-4 font-semibold first:mt-0 last:mb-0", className)} {...props}>
+      <h6 className={cn("mb-2 mt-3 text-sm font-semibold leading-normal first:mt-0 last:mb-0", className)} {...props}>
         {cleanChildren}
       </h6>
     );
   },
   p: ({ className, children, ...props }) => {
     // Remove emojis from text content
-    const cleanChildren = typeof children === 'string' ? removeEmojis(children) : children;
+    let cleanChildren = typeof children === 'string' ? removeEmojis(children) : children;
+    // If the paragraph is just a bolded string (e.g., **Title**), render as H1
+    if (
+      typeof cleanChildren === 'string' &&
+      /^\*\*[^\*]+\*\*$/.test(cleanChildren.trim())
+    ) {
+      // Remove the ** from start and end
+      const title = cleanChildren.trim().slice(2, -2).trim();
+      return (
+        <h1 className={cn("mb-4 mt-6 scroll-m-20 text-2xl font-bold tracking-tight leading-tight first:mt-0 last:mb-0", className)} {...props}>
+          {title}
+        </h1>
+      );
+    }
+    // Otherwise, render as normal paragraph with ChatGPT-like styling
     return (
-      <p className={cn("mb-5 mt-5 leading-7 first:mt-0 last:mb-0", className)} {...props}>
+      <p className={cn("mb-4 text-base leading-7 text-gray-800 dark:text-gray-200 first:mt-0 last:mb-0", className)} {...props}>
         {cleanChildren}
       </p>
     );
@@ -192,7 +209,7 @@ const defaultComponents = memoizeMarkdownComponents({
   a: ({ className, children, ...props }) => {
     const cleanChildren = typeof children === 'string' ? removeEmojis(children) : children;
     return (
-      <a className={cn("text-primary font-medium underline underline-offset-4", className)} {...props}>
+      <a className={cn("text-blue-600 dark:text-blue-400 font-medium underline underline-offset-2 hover:text-blue-800 dark:hover:text-blue-300 transition-colors", className)} {...props}>
         {cleanChildren}
       </a>
     );
@@ -200,62 +217,62 @@ const defaultComponents = memoizeMarkdownComponents({
   blockquote: ({ className, children, ...props }) => {
     const cleanChildren = typeof children === 'string' ? removeEmojis(children) : children;
     return (
-      <blockquote className={cn("border-l-2 pl-6 italic", className)} {...props}>
+      <blockquote className={cn("my-4 border-l-4 border-gray-300 dark:border-gray-600 pl-4 italic text-gray-700 dark:text-gray-300", className)} {...props}>
         {cleanChildren}
       </blockquote>
     );
   },
   ul: ({ className, ...props }) => (
-    <ul className={cn("my-5 ml-6 list-disc [&>li]:mt-2", className)} {...props} />
+    <ul className={cn("my-4 ml-6 list-disc space-y-2 text-gray-800 dark:text-gray-200", className)} {...props} />
   ),
   ol: ({ className, ...props }) => (
-    <ol className={cn("my-5 ml-6 list-decimal [&>li]:mt-2", className)} {...props} />
+    <ol className={cn("my-4 ml-6 list-decimal space-y-2 text-gray-800 dark:text-gray-200", className)} {...props} />
   ),
   li: ({ className, children, ...props }) => {
     const cleanChildren = typeof children === 'string' ? removeEmojis(children) : children;
     return (
-      <li className={className} {...props}>
+      <li className={cn("leading-7", className)} {...props}>
         {cleanChildren}
       </li>
     );
   },
   hr: ({ className, ...props }) => (
-    <hr className={cn("my-5 border-b", className)} {...props} />
+    <hr className={cn("my-6 border-gray-200 dark:border-gray-700", className)} {...props} />
   ),
   table: ({ className, ...props }) => (
-    <table className={cn("my-5 w-full border-separate border-spacing-0 overflow-y-auto", className)} {...props} />
+    <table className={cn("my-6 w-full border-separate border-spacing-0 overflow-y-auto rounded-lg", className)} {...props} />
   ),
   th: ({ className, ...props }) => (
-    <th className={cn("bg-muted px-4 py-2 text-left font-bold first:rounded-tl-lg last:rounded-tr-lg [&[align=center]]:text-center [&[align=right]]:text-right", className)} {...props} />
+    <th className={cn("bg-gray-100 dark:bg-gray-800 px-4 py-3 text-left font-semibold text-gray-900 dark:text-gray-100 first:rounded-tl-lg last:rounded-tr-lg border-b border-gray-200 dark:border-gray-700 [&[align=center]]:text-center [&[align=right]]:text-right", className)} {...props} />
   ),
   td: ({ className, ...props }) => (
-    <td className={cn("border-b border-l px-4 py-2 text-left last:border-r [&[align=center]]:text-center [&[align=right]]:text-right", className)} {...props} />
+    <td className={cn("border-b border-gray-200 dark:border-gray-700 px-4 py-3 text-left text-gray-800 dark:text-gray-200 [&[align=center]]:text-center [&[align=right]]:text-right", className)} {...props} />
   ),
   tr: ({ className, ...props }) => (
-    <tr className={cn("m-0 border-b p-0 first:border-t [&:last-child>td:first-child]:rounded-bl-lg [&:last-child>td:last-child]:rounded-br-lg", className)} {...props} />
+    <tr className={cn("hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors [&:last-child>td:first-child]:rounded-bl-lg [&:last-child>td:last-child]:rounded-br-lg", className)} {...props} />
   ),
   sup: ({ className, ...props }) => (
-    <sup className={cn("[&>a]:text-xs [&>a]:no-underline", className)} {...props} />
+    <sup className={cn("text-xs [&>a]:no-underline", className)} {...props} />
   ),
   details: ({ className, ...props }) => (
-    <details className={cn("my-4 rounded-lg border border-gray-200 bg-gray-50 dark:bg-gray-800 dark:border-gray-700 p-4 [&[open]>summary]:mb-4 [&>summary]:cursor-pointer transition-colors", className)} {...props} />
+    <details className={cn("my-4 rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50 p-4 [&[open]>summary]:mb-3 transition-all", className)} {...props} />
   ),
   summary: ({ className, ...props }) => (
     <summary className={cn(
-      "cursor-pointer font-semibold text-gray-700 dark:text-gray-300 hover:text-gray-900 dark:hover:text-gray-100 select-none list-none",
+      "cursor-pointer font-semibold text-gray-800 dark:text-gray-200 hover:text-gray-600 dark:hover:text-gray-300 select-none list-none transition-colors",
       "[&::-webkit-details-marker]:hidden [&::marker]:hidden",
-      "relative pl-6 before:content-['▶'] before:absolute before:left-0 before:transition-transform",
+      "relative pl-6 before:content-['▶'] before:absolute before:left-0 before:transition-transform before:text-gray-500",
       "[details[open]>&]:before:rotate-90"
     , className)} {...props} />
   ),
   pre: ({ className, ...props }) => (
-    <pre className={cn("overflow-x-auto rounded-b-lg bg-black p-4 text-white", className)} {...props} />
+    <pre className={cn("overflow-x-auto rounded-b-lg bg-gray-900 dark:bg-black p-4 text-gray-100 text-sm leading-relaxed", className)} {...props} />
   ),
   code: function Code({ className, ...props }) {
     const isCodeBlock = useIsMarkdownCodeBlock();
     return (
       <code
-        className={cn(!isCodeBlock && "bg-muted rounded border font-semibold", className)}
+        className={cn(!isCodeBlock && "bg-gray-100 dark:bg-gray-800 text-gray-800 dark:text-gray-200 rounded px-1.5 py-0.5 font-mono text-sm font-medium", className)}
         {...props}
       />
     );

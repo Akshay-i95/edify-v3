@@ -264,11 +264,7 @@ export async function POST(req: Request) {
           };
           
           // 1. Add follow-up context if this is a follow-up query
-          if (isFollowUp && followUpContext) {
-            if (followUpContext.previous_topic) {
-              await sendChunk(`*Building on our previous discussion about ${followUpContext.previous_topic.substring(0, 50)}...*\n\n`, 50);
-            }
-          }
+          // (Removed UI display - context is used internally but not shown to user)
           
           // 2. Add reasoning section first with ChatGPT-style collapsible dropdown
           if (reasoning?.trim()) {
@@ -307,11 +303,11 @@ export async function POST(req: Request) {
               
               // Convert markdown-style headers to HTML
               if (trimmedLine.startsWith('### ')) {
-                formattedLines.push(`<div style="font-weight: 600; font-size: 15px; color: #10a37f; margin: 16px 0 8px 0;">${trimmedLine.substring(4)}</div>`);
+                formattedLines.push(`<div class="reasoning-heading" style="font-size: 15px; margin: 16px 0 8px 0;">${trimmedLine.substring(4)}</div>`);
               } else if (trimmedLine.startsWith('## ')) {
-                formattedLines.push(`<div style="font-weight: 600; font-size: 16px; color: #0d8f6b; margin: 18px 0 10px 0;">${trimmedLine.substring(3)}</div>`);
+                formattedLines.push(`<div class="reasoning-heading" style="font-size: 16px; margin: 18px 0 10px 0;">${trimmedLine.substring(3)}</div>`);
               } else if (trimmedLine.startsWith('# ')) {
-                formattedLines.push(`<div style="font-weight: 700; font-size: 17px; color: #0a7a5c; margin: 20px 0 12px 0;">${trimmedLine.substring(2)}</div>`);
+                formattedLines.push(`<div class="reasoning-heading" style="font-weight: 700; font-size: 17px; margin: 20px 0 12px 0;">${trimmedLine.substring(2)}</div>`);
               }
               // Convert numbered lists (1., 2., 3., etc.) - More flexible pattern
               else if (/^\d+[\.\)\:]\s+/.test(trimmedLine)) {
@@ -321,17 +317,17 @@ export async function POST(req: Request) {
                   
                   // Skip if content is empty
                   if (!content || !content.trim()) {
-                    formattedLines.push(`<div style="margin-left: 20px; padding: 8px 12px; border-left: 3px solid #10a37f; margin-top: 8px; margin-bottom: 8px; background: rgba(16, 163, 127, 0.03);"><span style="font-weight: 700; color: #10a37f; font-size: 15px;">${number}.</span></div>`);
+                    formattedLines.push(`<div class="reasoning-step-box"><span class="reasoning-step-number">${number}.</span></div>`);
                     continue;
                   }
                   
                   // Process inline formatting in content
                   let formattedContent = content
-                    .replace(/\*\*(.+?)\*\*/g, '<strong style="font-weight: 600; color: #1f2937;">$1</strong>')
-                    .replace(/\*(.+?)\*/g, '<em style="font-style: italic; color: #4b5563;">$1</em>')
-                    .replace(/`(.+?)`/g, '<code style="background: #f3f4f6; padding: 2px 6px; border-radius: 4px; font-family: monospace; font-size: 13px; color: #e11d48;">$1</code>');
+                    .replace(/\*\*(.+?)\*\*/g, '<strong class="reasoning-strong">$1</strong>')
+                    .replace(/\*(.+?)\*/g, '<em class="reasoning-em">$1</em>')
+                    .replace(/`(.+?)`/g, '<code class="reasoning-code">$1</code>');
                   
-                  formattedLines.push(`<div style="margin-left: 20px; padding: 8px 12px; border-left: 3px solid #10a37f; margin-top: 8px; margin-bottom: 8px; background: rgba(16, 163, 127, 0.03);"><span style="font-weight: 700; color: #10a37f; font-size: 15px;">${number}.</span> <span style="color: #1f2937;">${formattedContent}</span></div>`);
+                  formattedLines.push(`<div class="reasoning-step-box"><span class="reasoning-step-number">${number}.</span> <span class="reasoning-text">${formattedContent}</span></div>`);
                   console.log(`✅ Formatted step ${number}`);
                 }
               }
@@ -339,20 +335,20 @@ export async function POST(req: Request) {
               else if (/^[\-\*]\s+/.test(trimmedLine)) {
                 const content = trimmedLine.substring(2);
                 let formattedContent = content
-                  .replace(/\*\*(.+?)\*\*/g, '<strong style="font-weight: 600; color: #1f2937;">$1</strong>')
-                  .replace(/\*(.+?)\*/g, '<em style="font-style: italic; color: #4b5563;">$1</em>')
-                  .replace(/`(.+?)`/g, '<code style="background: #f3f4f6; padding: 2px 6px; border-radius: 4px; font-family: monospace; font-size: 13px; color: #e11d48;">$1</code>');
+                  .replace(/\*\*(.+?)\*\*/g, '<strong class="reasoning-strong">$1</strong>')
+                  .replace(/\*(.+?)\*/g, '<em class="reasoning-em">$1</em>')
+                  .replace(/`(.+?)`/g, '<code class="reasoning-code">$1</code>');
                 
-                formattedLines.push(`<div style="margin-left: 20px; padding-left: 12px; border-left: 2px solid #e5e7eb; margin-top: 6px; margin-bottom: 6px; color: #374151;">• ${formattedContent}</div>`);
+                formattedLines.push(`<div class="reasoning-bullet">• ${formattedContent}</div>`);
               }
               // Regular text with inline formatting
               else {
                 let formattedContent = trimmedLine
-                  .replace(/\*\*(.+?)\*\*/g, '<strong style="font-weight: 600; color: #1f2937;">$1</strong>')
-                  .replace(/\*(.+?)\*/g, '<em style="font-style: italic; color: #4b5563;">$1</em>')
-                  .replace(/`(.+?)`/g, '<code style="background: #f3f4f6; padding: 2px 6px; border-radius: 4px; font-family: monospace; font-size: 13px; color: #e11d48;">$1</code>');
+                  .replace(/\*\*(.+?)\*\*/g, '<strong class="reasoning-strong">$1</strong>')
+                  .replace(/\*(.+?)\*/g, '<em class="reasoning-em">$1</em>')
+                  .replace(/`(.+?)`/g, '<code class="reasoning-code">$1</code>');
                 
-                formattedLines.push(`<div style="margin: 6px 0; color: #374151; line-height: 1.6;">${formattedContent}</div>`);
+                formattedLines.push(`<div class="reasoning-text" style="margin: 6px 0; line-height: 1.6;">${formattedContent}</div>`);
               }
             }
             
@@ -374,10 +370,11 @@ export async function POST(req: Request) {
             const reasoningHtml = `
 <style>
   .simple-reasoning-summary {
-    padding: 8px 0;
+    padding: 10px 12px;
     cursor: pointer;
-    font-size: 14px;
-    color: #6b7280;
+    font-size: 13px;
+    color: var(--foreground);
+    opacity: 0.7;
     display: flex;
     align-items: center;
     gap: 8px;
@@ -385,47 +382,121 @@ export async function POST(req: Request) {
     border: none;
     outline: none;
     transition: all 0.2s ease;
+    border-radius: 8px;
+    background: transparent;
   }
   .simple-reasoning-summary:hover {
-    color: #374151;
+    opacity: 1;
+    background: rgba(0, 0, 0, 0.03);
+  }
+  .dark .simple-reasoning-summary:hover {
+    background: rgba(255, 255, 255, 0.05);
   }
   .simple-reasoning-chevron {
-    color: #9ca3af;
-    transition: transform 0.2s ease;
-    transform: rotate(0deg);
-    width: 12px;
-    height: 12px;
+    display: none;
   }
   .simple-reasoning-details[open] .simple-reasoning-chevron {
-    transform: rotate(90deg);
+    display: none;
   }
   .simple-reasoning-content {
-    padding: 12px 0 12px 20px;
-    border-left: 2px solid #e5e7eb;
+    padding: 16px 12px 12px 20px;
+    border-left: 2px solid rgba(0, 0, 0, 0.1);
     margin-left: 6px;
+    margin-top: 8px;
+  }
+  .dark .simple-reasoning-content {
+    border-left-color: rgba(255, 255, 255, 0.1);
+  }
+  .reasoning-step-box {
+    margin-left: 20px;
+    padding: 8px 12px;
+    border-left: 3px solid #10a37f;
+    margin-top: 8px;
+    margin-bottom: 8px;
+    background: rgba(16, 163, 127, 0.08);
+    border-radius: 4px;
+  }
+  .dark .reasoning-step-box {
+    background: rgba(16, 163, 127, 0.15);
+    border-left-color: #14b890;
+  }
+  .reasoning-step-number {
+    font-weight: 700;
+    color: #10a37f;
+    font-size: 15px;
+  }
+  .dark .reasoning-step-number {
+    color: #14b890;
+  }
+  .reasoning-text {
+    color: #1f2937;
+  }
+  .dark .reasoning-text {
+    color: #e5e7eb;
+  }
+  .reasoning-strong {
+    font-weight: 600;
+    color: #0f172a;
+  }
+  .dark .reasoning-strong {
+    color: #f9fafb;
+  }
+  .reasoning-em {
+    font-style: italic;
+    color: #4b5563;
+  }
+  .dark .reasoning-em {
+    color: #9ca3af;
+  }
+  .reasoning-code {
+    background: #f3f4f6;
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-family: monospace;
+    font-size: 13px;
+    color: #e11d48;
+  }
+  .dark .reasoning-code {
+    background: #374151;
+    color: #fb7185;
+  }
+  .reasoning-bullet {
+    margin-left: 20px;
+    padding-left: 12px;
+    border-left: 2px solid #e5e7eb;
+    margin-top: 6px;
+    margin-bottom: 6px;
+    color: #374151;
+  }
+  .dark .reasoning-bullet {
+    border-left-color: #4b5563;
+    color: #d1d5db;
+  }
+  .reasoning-heading {
+    font-weight: 600;
+    color: #0f172a;
+    margin: 12px 0 8px 0;
+  }
+  .dark .reasoning-heading {
+    color: #f3f4f6;
   }
 </style>
 <details class="simple-reasoning-details" style="
-  margin: 16px 0;
+  margin: 12px 0 20px 0;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif;
 ">
   <summary class="simple-reasoning-summary">
-    <svg class="simple-reasoning-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-      <polyline points="9,18 15,12 9,6"/>
-    </svg>
-    <span>Thinking</span>
+    <span style="font-weight: 500;">Thinking</span>
   </summary>
   <div class="simple-reasoning-content" style="
     font-size: 14px;
     line-height: 1.7;
-    color: #374151;
+    color: var(--foreground);
+    opacity: 0.85;
   ">${processedReasoning}</div>
 </details>
 
 <style>
-details[open] summary svg:first-of-type {
-  transform: rotate(90deg) !important;
-}
 details summary::-webkit-details-marker {
   display: none;
 }
