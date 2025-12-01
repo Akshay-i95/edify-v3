@@ -281,7 +281,8 @@ def chat():
             include_context=True,
             messages=messages,  # Pass full messages array instead of conversation_history
             thread_id=thread_id,  # Pass thread ID for conversation continuity
-            namespaces=namespaces
+            namespaces=namespaces,
+            role=role  # Pass role for admin-specific behavior
         )
         
         # Extract response content

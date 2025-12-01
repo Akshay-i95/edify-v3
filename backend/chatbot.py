@@ -339,13 +339,14 @@ class AIChhatbotInterface:
         'kb-ssp': ['grade11', 'grade12'],
     }
 
-    def process_query(self, user_query: str, include_context: bool = True, messages: List[Dict] = None, thread_id: str = None, namespaces: List[str] = None) -> Dict:
+    def process_query(self, user_query: str, include_context: bool = True, messages: List[Dict] = None, thread_id: str = None, namespaces: List[str] = None, role: str = None) -> Dict:
         """Process user query and generate response with thread-based short-term memory"""
         try:
             start_time = time.time()
             self.session_stats['queries_processed'] += 1
             
             self.logger.info(f"Processing query: {user_query[:100]}...")
+            self.logger.info(f"[ROLE] User role: {role}")
             
             # STEP 0: Check for casual/conversational queries first
             is_casual, casual_response = self._is_casual_conversation(user_query)
@@ -418,40 +419,56 @@ class AIChhatbotInterface:
                     all_relevant_chunks.extend(chunks)
             
             # Enhanced deduplication: prioritize source diversity
+            # ADMIN ROLE: Skip deduplication and return ALL chunks for admin users
             seen_ids = set()
             file_sources = set()
             relevant_chunks = []
             
-            # First pass: Get one chunk from each unique source file (prioritize diversity)
-            for chunk in sorted(all_relevant_chunks, key=lambda x: x.get('score', 0), reverse=True):
-                chunk_id = chunk.get('id', '')
-                filename = chunk.get('metadata', {}).get('filename', 'unknown')
-                
-                if chunk_id not in seen_ids and filename not in file_sources:
-                    seen_ids.add(chunk_id)
-                    file_sources.add(filename)
-                    relevant_chunks.append(chunk)
-                    self.logger.info(f"[DEDUP-PASS1] Added chunk from NEW file: {filename}")
+            if role == 'admin':
+                # Admin users get ALL chunks without ANY deduplication
+                self.logger.info(f"[ADMIN MODE] Skipping ALL deduplication, returning all {len(all_relevant_chunks)} chunks")
+                for idx, chunk in enumerate(sorted(all_relevant_chunks, key=lambda x: x.get('score', 0), reverse=True)):
+                    chunk_id = chunk.get('id', '')
+                    filename = chunk.get('metadata', {}).get('filename', 'unknown')
+                    score = chunk.get('score', 0)
+                    self.logger.info(f"[ADMIN] Chunk {idx+1}/{len(all_relevant_chunks)}: {filename} (score: {score:.3f}, id: {chunk_id[:20]}...)")
                     
-                    # Stop if we have enough diverse sources
-                    if len(relevant_chunks) >= self.max_context_chunks:
-                        break
-            
-            # Second pass: Fill remaining slots with best chunks from any source
-            remaining_slots = self.max_context_chunks - len(relevant_chunks)
-            if remaining_slots > 0:
+                    # Track unique IDs to see if duplicates exist
+                    if chunk_id in seen_ids:
+                        self.logger.warning(f"[ADMIN WARNING] Duplicate chunk_id detected: {chunk_id[:30]}...")
+                    seen_ids.add(chunk_id)
+                    relevant_chunks.append(chunk)
+            else:
+                # First pass: Get one chunk from each unique source file (prioritize diversity)
                 for chunk in sorted(all_relevant_chunks, key=lambda x: x.get('score', 0), reverse=True):
                     chunk_id = chunk.get('id', '')
                     filename = chunk.get('metadata', {}).get('filename', 'unknown')
                     
-                    if chunk_id not in seen_ids:
+                    if chunk_id not in seen_ids and filename not in file_sources:
                         seen_ids.add(chunk_id)
+                        file_sources.add(filename)
                         relevant_chunks.append(chunk)
-                        self.logger.info(f"[DEDUP-PASS2] Added additional chunk from: {filename}")
+                        self.logger.info(f"[DEDUP-PASS1] Added chunk from NEW file: {filename}")
                         
-                        remaining_slots -= 1
-                        if remaining_slots <= 0:
+                        # Stop if we have enough diverse sources
+                        if len(relevant_chunks) >= self.max_context_chunks:
                             break
+                
+                # Second pass: Fill remaining slots with best chunks from any source
+                remaining_slots = self.max_context_chunks - len(relevant_chunks)
+                if remaining_slots > 0:
+                    for chunk in sorted(all_relevant_chunks, key=lambda x: x.get('score', 0), reverse=True):
+                        chunk_id = chunk.get('id', '')
+                        filename = chunk.get('metadata', {}).get('filename', 'unknown')
+                        
+                        if chunk_id not in seen_ids:
+                            seen_ids.add(chunk_id)
+                            relevant_chunks.append(chunk)
+                            self.logger.info(f"[DEDUP-PASS2] Added additional chunk from: {filename}")
+                            
+                            remaining_slots -= 1
+                            if remaining_slots <= 0:
+                                break
             
             # Log file distribution before and after
             files_before = {}
@@ -1896,23 +1913,35 @@ class AIChhatbotInterface:
     def _format_sources(self, chunks: List[Dict]) -> List[Dict]:
         """Format source information for response with download URLs and original filenames"""
         try:
-            # Extract unique filenames from chunks
+            # Extract unique filenames from chunks with all associated chunk data
             file_sources = {}
+            chunk_details = []  # Track all chunks for detailed view
             
             for chunk in chunks:
                 # Extract metadata from chunk
                 metadata = chunk.get('metadata', {})
                 filename = metadata.get('filename', '')
+                chunk_text = chunk.get('text', '')
                 
                 if filename:
-                    # Use the full filename as the key instead of extracting UUID
+                    # Track individual chunk for admin view
+                    chunk_details.append({
+                        'filename': filename,
+                        'text': chunk_text,
+                        'chunk_id': chunk.get('id', ''),
+                        'score': chunk.get('score', 0),
+                        'metadata': metadata
+                    })
+                    
+                    # Use the full filename as the key for unique documents
                     if filename not in file_sources:
-                        # Initialize source entry
+                        # Initialize source entry for unique document
                         source_entry = {
                             'filename': filename,  # Use actual filename for download
                             'title': self._get_display_name_from_filename(filename),
                             'download_url': None,
-                            'excerpt': chunk.get('text', '')[:200] + '...' if chunk.get('text') else None,
+                            'excerpt': chunk_text[:200] + '...' if chunk_text else None,
+                            'chunks': [],  # Store all chunks from this document
                             # Video-specific metadata
                             'video_url': metadata.get('video_url'),
                             'media_type': 'video' if filename.lower().endswith('.mp4') else 'document',
@@ -1935,6 +1964,14 @@ class AIChhatbotInterface:
                             source_entry['download_available'] = False
                         
                         file_sources[filename] = source_entry
+                    
+                    # Add chunk info to this document's chunks list
+                    file_sources[filename]['chunks'].append({
+                        'chunk_id': chunk.get('id', ''),
+                        'text': chunk_text,
+                        'score': chunk.get('score', 0),
+                        'excerpt': chunk_text[:200] + '...' if chunk_text else None
+                    })
             
             # Format sources for response
             formatted_sources = []
@@ -1947,6 +1984,8 @@ class AIChhatbotInterface:
                     'excerpt': source_info.get('excerpt'),
                     'download_url': source_info.get('download_url'),
                     'download_available': source_info.get('download_available', False),
+                    'chunk_count': len(source_info.get('chunks', [])),  # Number of chunks from this doc
+                    'chunks': source_info.get('chunks', []),  # All chunks for admin view
                     # Video-specific fields
                     'video_url': source_info.get('video_url'),
                     'media_type': source_info.get('media_type', 'document'),
@@ -1955,7 +1994,7 @@ class AIChhatbotInterface:
                 
                 formatted_sources.append(source)
             
-            self.logger.info(f"[SUCCESS] Formatted {len(formatted_sources)} sources for download")
+            self.logger.info(f"[SUCCESS] Formatted {len(formatted_sources)} unique sources with {len(chunk_details)} total chunks")
             return formatted_sources
             
         except Exception as e:
