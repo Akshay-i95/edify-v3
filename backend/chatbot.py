@@ -501,8 +501,8 @@ class AIChhatbotInterface:
             # Step 5: Optimize context for LLM
             optimized_context = self._optimize_context_for_llm(relevant_chunks, processed_query)
             
-            # Step 6: Generate response with follow-up context
-            response = self._generate_llm_response(processed_query, optimized_context, is_follow_up, follow_up_context)
+            # Step 6: Generate response with follow-up context and role-based styling
+            response = self._generate_llm_response(processed_query, optimized_context, is_follow_up, follow_up_context, role)
             
             # Step 7: Add citations and source attribution
             if self.enable_citations:
@@ -1710,8 +1710,8 @@ class AIChhatbotInterface:
         else:
             return 'MODERATE'
 
-    def _generate_llm_response(self, query: str, context: str, is_follow_up: bool = False, follow_up_context: Dict = None) -> str:
-        """Generate response using LLM service with optimized context"""
+    def _generate_llm_response(self, query: str, context: str, is_follow_up: bool = False, follow_up_context: Dict = None, role: str = None) -> str:
+        """Generate response using LLM service with optimized context and role-based styling"""
         try:
             # Determine if a short response is requested - Default to comprehensive for Edify expertise
             should_be_concise = False  # Default to comprehensive responses with Edify persona
@@ -1788,7 +1788,8 @@ class AIChhatbotInterface:
                     llm_response = self.llm_service.generate_response(
                         query=enhanced_query,
                         context=enhanced_context,
-                        conversation_history=[]
+                        conversation_history=[],
+                        role=role
                     )
                     
                     if llm_response.get('response'):

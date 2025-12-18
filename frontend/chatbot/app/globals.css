@@ -267,4 +267,59 @@
       gap: 8px;
     }
   }
+
+  /* Shimmer animation for reasoning component */
+  @keyframes shimmer {
+    0% {
+      background-position: -200% 0;
+    }
+    100% {
+      background-position: 200% 0;
+    }
+  }
+
+  .animate-shimmer {
+    animation: shimmer var(--shimmer-duration, 1000ms) infinite linear;
+  }
+
+  /* Collapsible animations */
+  @keyframes collapsible-down {
+    from {
+      height: 0;
+    }
+    to {
+      height: var(--radix-collapsible-content-height);
+    }
+  }
+
+  @keyframes collapsible-up {
+    from {
+      height: var(--radix-collapsible-content-height);
+    }
+    to {
+      height: 0;
+    }
+  }
+
+  .animate-collapsible-down {
+    animation: collapsible-down var(--animation-duration, 200ms) ease-out;
+  }
+
+  .animate-collapsible-up {
+    animation: collapsible-up var(--animation-duration, 200ms) ease-out;
+  }
+
+  /* Custom utilities for reasoning component */
+  .bg-size-\[200\%_100\%\] {
+    background-size: 200% 100%;
+  }
+
+  .fill-mode-forwards {
+    animation-fill-mode: forwards;
+  }
+
+  .duration-\(--animation-duration\) {
+    animation-duration: var(--animation-duration, 200ms);
+  }
 }
+

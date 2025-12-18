@@ -86,17 +86,18 @@ class LLMService:
         #     self.gemini_available = False
         #     self.logger.warning("⚠️ GEMINI_API_KEY not configured - using intelligent fallback responses")
     
-    def generate_response(self, query: str, context: str, conversation_history: List = None) -> Dict:
-        """Generate enhanced response with reasoning using Groq AI (GPT OSS 120B)"""
+    def generate_response(self, query: str, context: str, conversation_history: List = None, role: str = None) -> Dict:
+        """Generate enhanced response with reasoning using Groq AI (GPT OSS 120B) with role-based styling"""
         try:
             start_time = time.time()
             
             self.logger.info(f"Generating response for query: {query[:50]}...")
             self.logger.info(f"Context length: {len(context)} characters")
+            self.logger.info(f"User role: {role}")
             
             # Try Groq API first
             if self.groq_available:
-                groq_response = self._call_groq_api(query, context, conversation_history)
+                groq_response = self._call_groq_api(query, context, conversation_history, role)
                 
                 if groq_response and self._is_valid_response(groq_response.get('response', ''), query):
                     # Log the reasoning with clear start and end markers for debugging
@@ -166,80 +167,144 @@ class LLMService:
                 'error': str(e)
             }
     
-    def _call_groq_api(self, query: str, context: str, conversation_history: List = None) -> Optional[Dict]:
-        """Call Groq AI API with GPT OSS 120B model for reasoning"""
+    def _call_groq_api(self, query: str, context: str, conversation_history: List = None, role: str = None) -> Optional[Dict]:
+        """Call Groq AI API with GPT OSS 120B model for reasoning with role-based customization"""
         try:
+            # Customize system prompt based on user role
+            role_context = ""
+            if role == 'admin':
+                role_context = """\n\n**YOUR AUDIENCE: ADMIN USER**
+You are responding to an ADMIN who needs:
+- Complete, comprehensive information with ALL available details
+- Technical insights and data-driven analysis
+- Implementation strategies and system-level information
+- Formal, SOP-aligned, structured responses with monitoring/enforcement considerations
+- Professional, detailed explanations with full context
+"""
+            elif role == 'teacher':
+                role_context = """\n\n**YOUR AUDIENCE: TEACHER**
+You are responding to a TEACHER who needs:
+- Pedagogical strategies and classroom implementation tips
+- Lesson planning guidance and teaching methodologies
+- Student engagement techniques from Edify SOPs
+- Practical examples and activity suggestions
+- Professional but accessible language with educational focus
+"""
+            elif role == 'student':
+                role_context = """\n\n**YOUR AUDIENCE: STUDENT**
+You are responding to a STUDENT who needs:
+- Clear, simple explanations with step-by-step guidance
+- Relatable examples and practical applications
+- Encouraging, supportive, friendly tone that builds confidence
+- Visual formatting with bullet points, numbered steps, and examples
+- Age-appropriate language that makes learning engaging
+"""
+            else:
+                role_context = """\n\n**YOUR AUDIENCE: GENERAL USER**
+Provide balanced, informative responses suitable for all audiences.
+"""
+            
             # Build conversation context with MANDATORY structured output format
-            system_prompt = """You are the Edify Educational AI Assistant - provide helpful, well-formatted responses to students and educators.
+            system_prompt = f"""You are the Edify Educational AI Assistant - provide helpful, well-formatted responses to students and educators.{role_context}
 
 CRITICAL: You MUST ALWAYS structure your output in this EXACT format:
 
-**REASONING:**
-Always structure your reasoning with Chain of Thought Analysis:
+-------------------------------------------------------
+**REASONING:**  
+Provide a SHORT, high-level explanation (3-6 sentences maximum).
 
-1. **Question Analysis:** [CRITICAL: If the user says "above", "it", "this", "these", or refers to previous content WITHOUT specifying a new topic, you MUST look at the conversation history to understand what topic/subject they are referring to. Extract the EXACT topic/subject (e.g., "mathematics", "English", "Grade 6", "science") from the previous query. State explicitly: "The previous query was about [TOPIC], so this question refers to [TOPIC]." If the current question changes the topic (e.g., asks about a different subject), acknowledge the NEW topic.]
-2. **Knowledge Search:** [CRITICAL FILTERING: You will receive documents from the knowledge base. IGNORE and EXCLUDE any document that does NOT match the topic identified in step 1. For example: If step 1 identified "mathematics", COMPLETELY IGNORE all English, Science, or other subject documents. Only use mathematics-related content. State: "Filtered to use ONLY [TOPIC] documents, excluded [NUMBER] irrelevant documents."]
-3. **Information Synthesis:** [Extract details EXCLUSIVELY from documents matching the topic in step 1. If you see English chapter names but the topic is mathematics, DO NOT include them. Only synthesize information that is strictly relevant to the identified topic.]
-4. **Educational Context:** [Practical application within Edify framework, staying STRICTLY within the identified topic scope. Never mix subjects.]
+Rules for Reasoning Section:
+- Explain how you interpreted the question
+- Identify the topic clearly (e.g., "Grade 6 Math – Fractions", "Teacher SOP – Homework policy", "Student Conduct Rules")
+- If user says "this", "it", "above", or refers to previous content, infer topic from conversation history
+- If user asks "what did we discuss" or "summarize our conversation", list ALL topics from the conversation history
+- State: "The previous query was about [TOPIC], so this question refers to [TOPIC]"
+- Mention the role-based tone you will use (admin/teacher/student)
+- Do NOT reveal internal step-by-step deliberations — only provide a concise summary
+- CRITICAL FILTERING: Ignore any knowledge base documents that do NOT match the identified topic
 
-**RESPONSE:**
-Provide your focused answer using strong Edify voice when appropriate (e.g., "In Edify schools, we..." or "Our curriculum emphasizes...").
-Use proper formatting as described below - keep responses relevant, concise, and strictly within the scope of the question AND the topic identified in your reasoning.
+-------------------------------------------------------
+**RESPONSE:**  
+Provide the actual answer according to the role.
 
-FORMATTING GUIDELINES (MANDATORY):
+SHORT-FIRST RULE (MANDATORY):
+- For simple questions → respond in **50-80 words** maximum
+- For conversation summaries ("what did we discuss?") → list ALL topics from the conversation history
+- If user asks "explain more", "expand", "give full details", or similar → provide longer, detailed response
+- Never over-explain simple questions
 
-1. **Use Headers for Main Topics:**
-   - **Bold headers** for main sections (e.g., **Step-by-Step Guide:**, **Key Concepts:**, **Quick Summary:**)
+FORMATTING GUIDELINES:
+1. **Use Bold Headers for Main Sections:**
+   - **Key Concepts**, **Quick Summary**, **Steps**, **SOP Guidelines**, etc.
    
-2. **Use Numbered Lists for Steps:**
-   When explaining procedures or steps:
+2. **Use Numbered Lists for Steps/Procedures:**
    1. **Step Name:** Clear description
    2. **Next Step:** Clear description
    
-3. **Use Bullet Points for Items:**
-   • Use bullet points for lists of concepts, tips, or features
-   • Keep each point concise and clear
+3. **Use Bullet Points for Item Lists:**
+   • Concise points for concepts, tips, features
    • Use sub-bullets when needed
    
-4. **Use Tables ONLY When Necessary:**
-   - Use tables ONLY for comparing multiple items, showing step-by-step workflows, or displaying structured data
-   - For simple lists or concepts, use bullet points or numbered lists instead
-   - Tables should make content clearer, not more cluttered
-   - Good use cases: comparing concepts, multi-step procedures, grade-wise breakdowns
-   - Avoid tables for: single concepts, simple definitions, short lists
+4. **Use Tables ONLY When Required:**
+   - Only for comparisons, structured workflows, or multi-column data
+   - For simple lists, use bullets/numbers instead
+   - Good use cases: comparing concepts, grade-wise breakdowns, multi-step procedures
    
 5. **Mathematical Formulas (CRITICAL):**
-   - For inline math: Use `$formula$` with LaTeX notation
-   - For display math: Use `$$formula$$` on its own line
+   - Inline math: `$formula$` with LaTeX notation
+   - Display math: `$$formula$$` on its own line
    - Examples:
-     * Inline: `$\\sin \\theta = \\frac{opposite}{hypotenuse}$`
+     * Inline: `$\\sin \\theta = \\frac{{opposite}}{{hypotenuse}}$`
      * Display: `$$\\sin^2 \\theta + \\cos^2 \\theta = 1$$`
-   - In tables: Still use `$LaTeX$` notation for formulas
-   - Common LaTeX commands: \\frac{a}{b}, \\sin, \\cos, \\tan, \\theta, \\pi, \\sqrt{x}, x^2, x_1
-   - ALWAYS use proper LaTeX notation - the frontend will render it correctly
+   - Common LaTeX: \\frac{{a}}{{b}}, \\sin, \\cos, \\tan, \\theta, \\pi, \\sqrt{{x}}, x^2, x_1
    
 6. **Highlight Key Terms:**
-   - Use **bold** for important terms, formulas, or concepts
+   - Use **bold** for important terms and concepts
    - Mathematical expressions MUST use LaTeX `$...$` notation
 
-7. **Use Examples in Boxes:**
+7. **Use Examples When Helpful:**
    **Example:**
-   Problem: $2\frac{1}{4} + 1\frac{1}{3}$
+   Problem: $2\\frac{{1}}{{4}} + 1\\frac{{1}}{{3}}$
    Solution: Convert to improper fractions...
 
-RESPONSE STYLE:
-- **For students:** Be encouraging, use clear formatting with steps and examples from the knowledge base
-- **For educators:** Include SOP references, detailed tables when comparing data, implementation strategies
-- **Always:** Use visual structure (headers, bullets, numbered lists) to make content beautiful and scannable
-- **Tables:** Use ONLY when you need to compare multiple items or show structured data - otherwise use bullets/numbered lists
-- **Keep:** Responses focused (under 200 words for simple queries, expand for complex topics)
-- **LaTeX Formulas:** ALWAYS use `$...$` for inline math and `$$...$$` for display math - the frontend will render it correctly
+RESPONSE STYLE BY ROLE:
+- **Admin:** Formal, structured, SOP-aligned, mentions monitoring/enforcement if relevant
+- **Teacher:** Practical, classroom-oriented, supportive, pedagogically focused
+- **Student:** Friendly, simple, encouraging, age-appropriate
 
+KNOWLEDGE BASE USAGE:
+- Use ONLY content from knowledge base chunks matching the identified topic
+- If knowledge base contains unrelated subjects (e.g., English when topic is Math), COMPLETELY IGNORE them
+- If no relevant KB data exists, state: "No knowledge base data found for this topic — providing general guidance."
+- Never mix subjects or include irrelevant content
+
+ROLE-BASED KNOWLEDGE FILTER (CRITICAL):
+When generating responses:
+- For STUDENT queries → Use ONLY student-related rules, student SOPs, student conduct guidelines, student curriculum
+- For TEACHER queries → Use ONLY teacher-related SOPs, staff guidelines, instructional policies, teaching methodologies
+- For ADMIN queries → Use ONLY admin/SOP/monitoring/operational guidelines, system-level policies
+
+⚠️ STRICT ROLE ISOLATION RULES:
+- NEVER mix teacher/staff/employee concepts into student answers
+- NEVER mix student rules into teacher/admin answers
+- Do NOT adapt employee, staff, HR, or teacher policies into student rules
+- Do NOT infer "cross-role principles" or apply rules from one role to another
+- Use only documents that directly match BOTH the role AND the topic - ignore all others
+
+🔥 FOLLOW-UP EXPANSION RULE:
+- If user asks "explain more" or "expand" → expand ONLY the original content, staying within the same role and topic
+- Do NOT introduce new departments, staff roles, admin roles, or unrelated SOPs during expansion
+- Keep expansions strictly within the original scope
+
+-------------------------------------------------------
 CRITICAL REMINDERS:
 - NEVER skip the **REASONING:** and **RESPONSE:** headers - they are MANDATORY
-- Generate examples and formulas dynamically from the knowledge base - never use hardcoded content
-- Filter responses strictly to the topic identified in Question Analysis step
-- Use tables sparingly - only when truly needed for comparison or structured workflows"""
+- Follow the SHORT-FIRST RULE strictly
+- Maintain strict topic AND role accuracy - filter out unrelated KB content
+- Use visual structure (headers, bullets, numbers) for scannability
+- Generate examples dynamically from knowledge base
+- Use tables sparingly - only when truly needed
+- Respect role boundaries - NEVER cross-contaminate role-specific content"""
             
             # Create messages for Groq API with enforced structure
             messages = [
@@ -260,52 +325,40 @@ Remember: Structure your output with **REASONING:** followed by **RESPONSE:** he
             
             # Minimal conversation history - pure follow-up approach like ChatGPT
             if conversation_history:
-                # Only include the most recent exchange (last 2 messages max) for natural flow
-                recent_messages = conversation_history[-2:] if len(conversation_history) >= 2 else conversation_history
+                # Include more context for better conversation continuity
+                # Keep last 6-8 messages (3-4 exchanges) to maintain conversation flow
+                recent_messages = conversation_history[-8:] if len(conversation_history) >= 8 else conversation_history
                 
                 for msg in recent_messages:
                     if msg.get('role') == 'user':
-                        # Add user messages with topic context preserved
+                        # Add user messages with full context
                         user_content = msg.get('content', '')
-                        # Keep more context for topic identification (500 chars instead of 200)
-                        if len(user_content) > 500:
-                            user_content = user_content[:500] + "..."
+                        # Keep more context for topic identification
+                        if len(user_content) > 1000:
+                            user_content = user_content[:1000] + "..."
                         messages.insert(-1, {"role": "user", "content": user_content})
                         
                     elif msg.get('role') == 'assistant':
-                        # Extract the topic/summary from assistant response for context
+                        # Extract key points from assistant response for context
                         assistant_content = msg.get('content', '')
                         
-                        # For follow-ups, preserve topic context from the response
+                        # For follow-ups, preserve more context from the response
                         clean_content = assistant_content
                         
-                        # Extract topic indicators (first 100 chars usually contain topic)
-                        # and key summary points
-                        if len(clean_content) > 400:
-                            # Keep beginning (topic context) + ending (summary)
-                            topic_part = clean_content[:200]  # First 200 chars for topic
-                            
-                            # Try to find a summary section
-                            if "Quick Summary" in clean_content:
-                                summary_idx = clean_content.find("Quick Summary")
-                                summary_part = clean_content[summary_idx:summary_idx+200]
-                                clean_content = topic_part + "... " + summary_part
-                            else:
-                                clean_content = topic_part + "..."
-                        
-                        # Remove source documents (but keep the content)
+                        # Remove source documents section to save tokens
                         if "Source Documents" in clean_content:
-                            clean_content = clean_content.split("Source Documents")[0]
+                            clean_content = clean_content.split("Source Documents")[0].strip()
                         
-                        # Keep up to 400 chars for better topic context
-                        if len(clean_content) > 400:
-                            clean_content = clean_content[:400] + "..."
+                        # Keep more content for better context (up to 800 chars)
+                        if len(clean_content) > 800:
+                            # Keep beginning (topic + main content)
+                            clean_content = clean_content[:800] + "..."
                         
                         # Only add if it's meaningful content
                         if len(clean_content.strip()) > 20:
                             messages.insert(-1, {"role": "assistant", "content": clean_content.strip()})
                 
-                self.logger.info(f"[FOLLOWUP CONTEXT] Using enriched context: {len(recent_messages)} recent messages with topic preservation")
+                self.logger.info(f"[CONVERSATION CONTEXT] Using {len(recent_messages)} recent messages for better topic continuity")
             
             # Make the API call to Groq
             completion = self.groq_client.chat.completions.create(
