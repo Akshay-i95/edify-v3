@@ -494,6 +494,282 @@ def mobile_chat():
         logger.error(traceback.format_exc())
         return jsonify({'error': 'An error occurred processing your request'}), 500
 
+# ============================================================
+# AUTO-INGESTION API ENDPOINTS
+# ============================================================
+
+kb_processor = None
+
+def get_kb_processor():
+    """Get or initialize KB processor instance"""
+    global kb_processor
+    if kb_processor is None:
+        logger.info("🔧 Initializing KB Processor...")
+        config = {
+            'chunk_size': 600,
+            'chunk_overlap': 120,
+            'enable_ocr': True,
+            'enable_repair': True,
+            'ocr_language': 'eng',
+            'ocr_dpi': 300,
+            'image_to_text': True
+        }
+        from enhanced_kb_processor import EnhancedKBProcessor
+        kb_processor = EnhancedKBProcessor(config)
+        logger.info("✅ KB Processor initialized!")
+    return kb_processor
+
+@app.route('/api/kb/ingest', methods=['POST'])
+def ingest_files():
+    """
+    Ingest files to Pinecone from Azure Blob Storage
+    
+    POST /api/kb/ingest
+    Body: {
+        "fileNames": ["kb/12/grade1/file.pdf", ...],
+        "container": "edifydocumentcontainer"  (optional)
+    }
+    """
+    try:
+        data = request.get_json()
+        
+        if not data:
+            return jsonify({'success': False, 'error': 'No JSON body provided'}), 400
+        
+        file_names = data.get('fileNames', [])
+        container = data.get('container', 'edifydocumentcontainer')
+        
+        if not file_names:
+            return jsonify({'success': False, 'error': 'fileNames array is required'}), 400
+        
+        processor = get_kb_processor()
+        
+        results = []
+        for file_name in file_names:
+            try:
+                # Process file
+                result = processor.process_blob_created(container, file_name)
+                results.append({
+                    'fileName': file_name,
+                    'success': result.get('success', False),
+                    'chunks': result.get('chunks', 0),
+                    'error': result.get('error')
+                })
+                
+            except Exception as e:
+                logger.error(f"Error processing {file_name}: {str(e)}")
+                results.append({
+                    'fileName': file_name,
+                    'success': False,
+                    'error': str(e)
+                })
+        
+        return jsonify({
+            'success': True,
+            'processed': len(file_names),
+            'results': results
+        })
+        
+    except Exception as e:
+        logger.error(f"Ingestion API error: {str(e)}")
+        logger.error(traceback.format_exc())
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/kb/ingest-local', methods=['POST'])
+def ingest_local_files():
+    """
+    Ingest files from local file system
+    
+    POST /api/kb/ingest-local
+    Body: {
+        "folderPath": "C:/data/kb/grade1",
+        "fileNames": ["file1.pdf", "file2.pptx"],
+        "namespace": "kb-psp"  (optional - auto-detected from path if not provided)
+    }
+    """
+    try:
+        data = request.get_json()
+        
+        if not data:
+            return jsonify({'success': False, 'error': 'No JSON body provided'}), 400
+        
+        folder_path = data.get('folderPath')
+        file_names = data.get('fileNames', [])
+        namespace_override = data.get('namespace', '')  # Optional namespace override
+        
+        if not folder_path:
+            return jsonify({'success': False, 'error': 'folderPath is required'}), 400
+        
+        if not file_names:
+            return jsonify({'success': False, 'error': 'fileNames array is required'}), 400
+        
+        # Verify folder exists
+        if not os.path.exists(folder_path):
+            return jsonify({'success': False, 'error': f'Folder not found: {folder_path}'}), 400
+        
+        processor = get_kb_processor()
+        
+        results = []
+        for file_name in file_names:
+            try:
+                # Pass namespace override if provided, otherwise auto-detect
+                if namespace_override:
+                    result = processor.process_local_file(folder_path, file_name, namespace_override=namespace_override)
+                else:
+                    result = processor.process_local_file(folder_path, file_name)
+                
+                results.append({
+                    'fileName': file_name,
+                    'success': result['success'],
+                    'chunks': result.get('chunks', 0),
+                    'namespace': result.get('namespace', ''),
+                    'error': result.get('error')
+                })
+                
+            except Exception as e:
+                logger.error(f"Error processing local file {file_name}: {str(e)}")
+                results.append({
+                    'fileName': file_name,
+                    'success': False,
+                    'error': str(e)
+                })
+        
+        return jsonify({
+            'success': True,
+            'processed': len(file_names),
+            'results': results
+        })
+        
+    except Exception as e:
+        logger.error(f"Local ingestion API error: {str(e)}")
+        logger.error(traceback.format_exc())
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/kb/delete', methods=['POST'])
+def delete_files():
+    """
+    Delete files from Pinecone
+    
+    POST /api/kb/delete
+    Body: {
+        "fileNames": ["kb/12/grade1/file1.pdf", "kb/12/common/file2.pdf"],
+        "namespace": ""  (optional - auto-detected from path if omitted)
+    }
+    
+    Note: fileNames should include the full blob path for proper namespace detection.
+    Examples:
+    - "kb/12/grade1/file.pdf" -> auto-detects kb-psp namespace
+    - "kb/12/grade11/file.pdf" -> auto-detects kb-ssp namespace
+    - "edipedia/2025-2026/preschools/file.pdf" -> auto-detects edipedia-preschools namespace
+    """
+    try:
+        data = request.get_json()
+        
+        if not data:
+            return jsonify({'success': False, 'error': 'No JSON body provided'}), 400
+        
+        file_names = data.get('fileNames', [])
+        namespace = data.get('namespace', '')  # Optional - auto-detect if empty
+        
+        if not file_names:
+            return jsonify({'success': False, 'error': 'fileNames array is required'}), 400
+        
+        processor = get_kb_processor()
+        
+        results = []
+        for file_name in file_names:
+            try:
+                # namespace will be auto-detected if empty
+                result = processor.delete_from_pinecone(file_name, namespace)
+                
+                # Get the namespace that was used
+                detected_namespace = namespace if namespace else processor.get_namespace_from_blob_path(file_name)
+                
+                results.append({
+                    'fileName': file_name,
+                    'success': result,
+                    'namespace': detected_namespace
+                })
+                
+            except Exception as e:
+                logger.error(f"Error deleting {file_name}: {str(e)}")
+                results.append({
+                    'fileName': file_name,
+                    'success': False,
+                    'error': str(e)
+                })
+        
+        return jsonify({
+            'success': True,
+            'deleted': len([r for r in results if r.get('success')]),
+            'results': results
+        })
+        
+    except Exception as e:
+        logger.error(f"Delete API error: {str(e)}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/kb/stats', methods=['GET'])
+def kb_stats():
+    """
+    Get Pinecone index statistics
+    
+    GET /api/kb/stats
+    """
+    try:
+        processor = get_kb_processor()
+        
+        # Get index stats
+        stats = processor.index.describe_index_stats()
+        
+        return jsonify({
+            'success': True,
+            'stats': {
+                'total_vectors': stats.get('total_vector_count', 0),
+                'dimension': stats.get('dimension', 384),
+                'namespaces': stats.get('namespaces', {}),
+                'index_fullness': stats.get('index_fullness', 0)
+            }
+        })
+        
+    except Exception as e:
+        logger.error(f"Stats API error: {str(e)}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/kb/list', methods=['GET'])
+def list_azure_files():
+    """
+    List files in Azure Blob Storage
+    
+    GET /api/kb/list?container=edifydocumentcontainer&prefix=kb/12/
+    """
+    try:
+        container = request.args.get('container', 'edifydocumentcontainer')
+        prefix = request.args.get('prefix', '')
+        
+        processor = get_kb_processor()
+        container_client = processor.blob_service_client.get_container_client(container)
+        
+        files = []
+        for blob in container_client.list_blobs(name_starts_with=prefix):
+            files.append({
+                'name': blob.name,
+                'size': blob.size,
+                'last_modified': blob.last_modified.isoformat() if blob.last_modified else None
+            })
+        
+        return jsonify({
+            'success': True,
+            'container': container,
+            'prefix': prefix,
+            'count': len(files),
+            'files': files
+        })
+        
+    except Exception as e:
+        logger.error(f"List API error: {str(e)}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
 # Error handlers
 @app.errorhandler(404)
 def not_found(error):
